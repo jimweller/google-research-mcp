@@ -21,6 +21,7 @@ import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from 'node:url'; // Import fileURLToPath
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises"; // Import fs promises for directory creation
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -502,6 +503,16 @@ app.post("/mcp", async (req: Request, res: Response, next: NextFunction) => {
                 criticalStreamIds: [], // Define critical streams if needed
                 eagerLoading: true
             });
+            
+            // Ensure request_queues directory exists
+            const requestQueuesDir = path.resolve(__dirname, '..', 'storage', 'request_queues', 'default');
+            try {
+                await fs.mkdir(requestQueuesDir, { recursive: true });
+                console.log(`✅ Created request queues directory: ${requestQueuesDir}`);
+            } catch (error) {
+                console.error(`❌ Error creating request queues directory: ${error}`);
+            }
+            
             transport = new StreamableHTTPServerTransport({
                 sessionIdGenerator: () => randomUUID(),
                 eventStore,
@@ -524,9 +535,7 @@ app.post("/mcp", async (req: Request, res: Response, next: NextFunction) => {
             });
             configureToolsAndResources(sessionServer, sessionTranscripts);
             await sessionServer.connect(transport);
-        }
-        // Bad session
-        else if (!transport) {
+        } else if (!transport) {
             res.status(400).json({
                 jsonrpc: "2.0",
                 error: { code: -32000, message: "Bad Request: No valid session ID provided" },
