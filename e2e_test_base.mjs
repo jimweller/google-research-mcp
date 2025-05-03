@@ -1,0 +1,190 @@
+// e2e_test_base.mjs
+import assert from "assert";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
+/**
+ * Base class for MCP end-to-end tests
+ * Provides shared functionality for both stdio and SSE transport tests
+ */
+export class MCPEndToEndTest {
+  constructor(transportType, clientName) {
+    this.transportType = transportType;
+    this.clientName = clientName;
+    this.client = null;
+    this.transport = null;
+  }
+
+  /**
+   * Check required environment variables
+   */
+  checkEnvironmentVariables() {
+    for (const k of [
+      "GOOGLE_CUSTOM_SEARCH_API_KEY",
+      "GOOGLE_CUSTOM_SEARCH_ID",
+      "GOOGLE_GEMINI_API_KEY"
+    ]) {
+      if (!process.env[k]) {
+        console.error(`❌ Missing env ${k}`);
+        process.exit(1);
+      }
+    }
+    console.log("✅ All required env vars are set");
+  }
+
+  /**
+   * Connect to the MCP server using the provided transport
+   * @param {Object} transport - The transport instance to use
+   */
+  async connect(transport) {
+    this.transport = transport;
+    this.client = new Client({ name: this.clientName, version: "1.0.0" });
+    await this.client.connect(this.transport);
+    console.log(`✅ Connected over ${this.transportType}!`);
+  }
+
+  /**
+   * List and verify available tools
+   */
+  async listTools() {
+    const { tools } = await this.client.listTools();
+    assert.deepStrictEqual(
+      tools.map((t) => t.name).sort(),
+      ["google_search", "scrape_page", "analyze_with_gemini", "research_topic"].sort()
+    );
+    console.log("✨ tools/list OK");
+  }
+
+  /**
+   * Test Google search functionality
+   * @returns {string} The URL from the search result
+   */
+  async testGoogleSearch() {
+    const {
+      content: [{ text: url }]
+    } = await this.client.callTool({
+      name: "google_search",
+      arguments: { query: "example.com", num_results: 1 }
+    });
+    assert(url.startsWith("http"));
+    console.log("✨ google_search OK:", url);
+    return url;
+  }
+
+  /**
+   * Test page scraping functionality
+   * @param {string} url - The URL to scrape
+   * @returns {string} The scraped content
+   */
+  async testScrapePage(url) {
+    const {
+      content: [{ text: scraped }]
+    } = await this.client.callTool({
+      name: "scrape_page",
+      arguments: { url }
+    });
+    assert(scraped.length > 50);
+    console.log("✨ scrape_page OK");
+    return scraped;
+  }
+
+  /**
+   * Test Gemini analysis functionality
+   * @param {string} text - The text to analyze
+   * @returns {string} The analysis result
+   */
+  async testAnalyzeWithGemini(text = "AI is transforming the world.") {
+    const {
+      content: [{ text: analysis }]
+    } = await this.client.callTool({
+      name: "analyze_with_gemini",
+      arguments: { text }
+    });
+    assert(analysis.length > 0);
+    console.log("✨ analyze_with_gemini OK");
+    return analysis;
+  }
+
+  /**
+   * Test research topic functionality
+   * @returns {string} The research summary
+   */
+  async testResearchTopic() {
+    const {
+      content: [{ text: summary }]
+    } = await this.client.callTool({
+      name: "research_topic",
+      arguments: {
+        query: "How do you integrate YouTube and Gemini API?",
+        num_results: 3
+      }
+    });
+    assert(summary.length > 0);
+    console.log("✨ research_topic OK");
+    return summary;
+  }
+
+  /**
+   * Test YouTube transcript functionality
+   * @returns {string} The transcript content
+   */
+  async testYouTubeTranscript() {
+    const {
+      content: [{ text: transcript }]
+    } = await this.client.callTool({
+      name: "scrape_page",
+      arguments: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
+    });
+    assert(transcript.length > 20 && !transcript.includes("<html"));
+    console.log("✨ YouTube transcript OK");
+    return transcript;
+  }
+
+  /**
+   * Test transcript analysis functionality
+   * @param {string} transcript - The transcript to analyze
+   */
+  async testTranscriptAnalysis(transcript) {
+    const {
+      content: [{ text: ta }]
+    } = await this.client.callTool({
+      name: "analyze_with_gemini",
+      arguments: { text: transcript.slice(0, 200) }
+    });
+    assert(ta.length > 0);
+    console.log("✨ Transcript analysis OK");
+    return ta;
+  }
+
+  /**
+   * Run all tests in sequence
+   */
+  async runAllTests() {
+    this.checkEnvironmentVariables();
+    
+    // Run all test steps
+    await this.listTools();
+    const url = await this.testGoogleSearch();
+    await this.testScrapePage(url);
+    await this.testAnalyzeWithGemini();
+    await this.testResearchTopic();
+    const transcript = await this.testYouTubeTranscript();
+    await this.testTranscriptAnalysis(transcript);
+    
+    console.log(`🎉 All ${this.transportType}-based end-to-end tests passed!`);
+  }
+
+  /**
+   * Clean up resources before exiting
+   */
+  async cleanup() {
+    if (this.transport && typeof this.transport.close === 'function') {
+      await this.transport.close();
+      console.log("✅ Transport closed properly");
+    } else {
+      console.log("⚠️ No close method found on transport");
+    }
+
+    // Allow any remaining operations to complete before exiting
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "google-researcher-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for research and web access",
+  "type": "module",
+  "scripts": {
+    "test:e2e": "npm run test:e2e:stdio && npm run test:e2e:sse",
+    "test:e2e:stdio": "node e2e_stdio_mcp_client_test.mjs",
+    "test:e2e:sse": "node e2e_sse_mcp_client_test.mjs",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "test:verbose": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose",
+    "test:fix": "node --experimental-vm-modules node_modules/jest/bin/jest.js --no-cache",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^0.9.0",
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "cors": "^2.8.5",
+    "crawlee": "^3.13.2",
+    "express": "^5.1.0",
+    "punycode": "^2.3.1",
+    "youtube-transcript": "^1.2.1",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.2",
+    "ts-node-dev": "^2.0.0"
+  }
+}
