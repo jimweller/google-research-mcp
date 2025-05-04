@@ -25,6 +25,7 @@ export class PersistenceManager implements IPersistenceManager {
   readonly storagePath: string;
   private metadataPath: string;
   private namespacesPath: string;
+  private directoriesEnsured: boolean = false;
 
   /**
    * Creates a new PersistenceManager
@@ -36,22 +37,26 @@ export class PersistenceManager implements IPersistenceManager {
     this.storagePath = storagePath;
     this.metadataPath = path.join(this.storagePath, 'metadata.json');
     this.namespacesPath = path.join(this.storagePath, 'namespaces');
-    this.ensureDirectoriesExist();
   }
 
   /**
    * Ensures that the storage directories exist
    *
    * Creates the main storage directory and the namespaces subdirectory
-   * if they don't already exist. This is called during initialization
+   * if they don't already exist. This is called before any file operation
    * to ensure the filesystem is ready for cache operations.
    *
    * @private
    */
   private async ensureDirectoriesExist(): Promise<void> {
+    if (this.directoriesEnsured) {
+      return;
+    }
+    
     try {
       await fs.mkdir(this.storagePath, { recursive: true });
       await fs.mkdir(this.namespacesPath, { recursive: true });
+      this.directoriesEnsured = true;
     } catch (error) {
       console.error('Error creating storage directories:', error);
       throw new Error('Failed to create storage directories');
@@ -174,6 +179,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async saveEntry<T>(namespace: string, key: string, entry: CacheEntry<T>): Promise<void> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       const namespacePath = this.getNamespacePath(namespace);
       await fs.mkdir(namespacePath, { recursive: true });
       
@@ -221,6 +229,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async loadEntry<T>(namespace: string, key: string): Promise<CacheEntry<T> | undefined> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       const entryPath = this.getEntryPath(namespace, key);
       
       try {
@@ -267,6 +278,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async saveAllEntries(entries: Map<string, Map<string, CacheEntry<any>>>): Promise<void> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       // Create a list of save operations
       const saveOperations: Promise<void>[] = [];
       
@@ -304,6 +318,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   private async updateMetadata(entries: Map<string, Map<string, CacheEntry<any>>>): Promise<void> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       let totalEntries = 0;
       let totalSize = 0;
       
@@ -349,6 +366,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async loadAllEntries(): Promise<Map<string, Map<string, CacheEntry<any>>>> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       const entries = new Map<string, Map<string, CacheEntry<any>>>();
       
       // Check if namespaces directory exists
@@ -420,6 +440,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async clear(): Promise<void> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       // Check if namespaces directory exists
       try {
         await fs.access(this.namespacesPath);
@@ -478,6 +501,9 @@ export class PersistenceManager implements IPersistenceManager {
    */
   async removeEntry(namespace: string, key: string): Promise<void> {
     try {
+      // Ensure directories exist before any file operation
+      await this.ensureDirectoriesExist();
+      
       const entryPath = this.getEntryPath(namespace, key);
       
       try {
