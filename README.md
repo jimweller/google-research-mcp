@@ -211,7 +211,7 @@ console.log(result.content[0].text);
       }
     }
   }
-   ```
+  ```
 3. Start the server and use Roo Code to ask research questions
 
 ## Tests
