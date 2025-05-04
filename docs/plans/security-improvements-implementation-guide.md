@@ -1,808 +1,478 @@
-# Security Improvements Implementation Guide: Google Researcher MCP Server
+# MCP Server Security Improvements Implementation Guide (Revision 2025-03-26)
 
-**Date:** April 22, 2025
-**Version:** 1.0
-**Author:** Roo (Docs Writer Mode)
+**Version:** 2.0
+**Date:** 2025-03-26
+**Status:** Proposed
 
 ## Table of Contents
 
 1.  [Executive Summary](#1-executive-summary)
-2.  [High Risk Findings & Implementation Guidelines](#2-high-risk-findings--implementation-guidelines)
-    *   [2.1 SSRF Protection for `scrape_page` Tool](#21-ssrf-protection-for-scrape_page-tool)
-    *   [2.2 Secure Cache Admin Endpoint Authorization](#22-secure-cache-admin-endpoint-authorization)
-    *   [2.3 Secure API Key Management](#23-secure-api-key-management)
-3.  [Medium Risk Findings & Implementation Guidelines](#3-medium-risk-findings--implementation-guidelines)
-    *   [3.1 Secure All Management Endpoints](#31-secure-all-management-endpoints)
-    *   [3.2 Secure CORS Configuration](#32-secure-cors-configuration)
-    *   [3.3 Enable Event Store Encryption](#33-enable-event-store-encryption)
-    *   [3.4 Implement Rate Limiting](#34-implement-rate-limiting)
-4.  [Low Risk Findings & Implementation Guidelines](#4-low-risk-findings--implementation-guidelines)
-    *   [4.1 Review Information Disclosure via Statistics](#41-review-information-disclosure-via-statistics)
-    *   [4.2 Implement Dependency Scanning](#42-implement-dependency-scanning)
-    *   [4.3 Enhance Security Logging](#43-enhance-security-logging)
-    *   [4.4 Timing Attacks (Awareness)](#44-timing-attacks-awareness)
-5.  [Implementation Roadmap](#5-implementation-roadmap)
-6.  [Potential Challenges & Mitigations](#6-potential-challenges--mitigations)
-7.  [Troubleshooting Guide](#7-troubleshooting-guide)
-8.  [References & Resources](#8-references--resources)
+2.  [OAuth 2.1 Delegation Strategy](#2-oauth-21-delegation-strategy)
+3.  [Token Validation Middleware](#3-token-validation-middleware)
+4.  [Scope Definition](#4-scope-definition)
+5.  [Client Responsibilities](#5-client-responsibilities)
+6.  [Metadata, DCR, and PKCE Clarification](#6-metadata-dcr-and-pkce-clarification)
+7.  [Transport, Batching, and Annotations](#7-transport-batching-and-annotations)
+8.  [High Risk Findings & Mitigation](#8-high-risk-findings--mitigation)
+    *   8.1 Server-Side Request Forgery (SSRF)
+    *   8.2 Secure Management Endpoints (HTTP)
+    *   8.3 Secure API Key & Secret Management
+9.  [Medium Risk Findings & Mitigation](#9-medium-risk-findings--mitigation)
+    *   9.1 Cross-Origin Resource Sharing (CORS)
+    *   9.2 Event Store Encryption
+    *   9.3 Rate Limiting
+10. [Low Risk Findings & Mitigation](#10-low-risk-findings--mitigation)
+    *   10.1 Dependency Vulnerability Management
+    *   10.2 Input Validation
+    *   10.3 Enhanced Logging & Monitoring
+    *   10.4 Least Privilege Principle
+11. [Implementation Roadmap (TDD Focused)](#11-implementation-roadmap-tdd-focused)
+12. [Potential Challenges](#12-potential-challenges)
+13. [Troubleshooting](#13-troubleshooting)
+14. [References](#14-references)
 
 ---
 
 ## 1. Executive Summary
 
-This document outlines the implementation plan for addressing security vulnerabilities identified during a review of the Google Researcher MCP Server codebase. The review highlighted several areas requiring attention, particularly concerning input validation (SSRF), authentication/authorization for management endpoints, secrets management, and secure configuration.
+This document outlines the implementation plan for critical security improvements to the `google-researcher-mcp` server, aligning with the MCP Specification (Revision 2025-03-26). The primary focus is the mandatory adoption of **OAuth 2.1 (Authorization Code Grant + PKCE)** for securing all HTTP transport interactions.
 
-Addressing the **High Risk** findings is paramount:
-
-*   Implementing robust SSRF protection for the `scrape_page` tool.
-*   Securing management endpoints with strong authentication and authorization.
-*   Adopting secure practices for managing API keys and other secrets.
-
-**Medium Risk** findings, such as securing CORS, enabling encryption for stored events, and implementing rate limiting, should also be prioritized to harden the server against common web attacks and potential abuse.
-
-**Low Risk** findings, including enhancing logging and dependency management, contribute to overall security posture and incident response capabilities.
-
-This guide provides detailed steps, code examples, and considerations for implementing these security improvements effectively.
+Crucially, this server will operate **strictly as an OAuth 2.1 Resource Server (RS)**. It will **delegate** user authentication and authorization token issuance to a trusted external Identity Provider (IdP) / Authorization Server (AS). This approach significantly reduces the security burden on the MCP server itself by leveraging established, robust external systems for identity management. Implementation will prioritize the development and testing of OAuth 2.1 Bearer token validation middleware, followed by addressing other key risks like SSRF, secrets management, CORS, rate limiting, encryption, and enhanced logging.
 
 ---
 
-## 2. High Risk Findings & Implementation Guidelines
-
-### 2.1 SSRF Protection for `scrape_page` Tool
-
-**Finding:** The `scrape_page` tool lacks sufficient validation to prevent Server-Side Request Forgery (SSRF), potentially allowing requests to internal network resources.
-
-**Location:** `src/server.ts` (lines 188, 304-306)
-
-**Impact:** Information disclosure, interaction with internal services, cloud metadata access.
-
-**Implementation Guidelines:**
-
-1.  **Install an SSRF Protection Library:** Use a dedicated library designed to prevent SSRF attacks. `ssrf-req-filter` is a potential option.
-    ```bash
-    npm install ssrf-req-filter
-    ```
-
-2.  **Implement Strict URL Validation:** Create a validation function that checks protocols, denies private/reserved IP addresses, and potentially enforces domain allowlists.
-
-    ```typescript
-    // src/shared/urlValidator.ts (New File)
-    import { Filter } from 'ssrf-req-filter';
-    import dns from 'node:dns/promises';
-
-    const ssrfFilter = new Filter({
-      // Allowed protocols (adjust as needed)
-      allowedProtocols: ['http', 'https'],
-      // Deny private IP ranges (RFC 1918, loopback, link-local)
-      // Filter automatically handles these common ranges
-      // You can add more specific deny rules if needed
-    });
-
-    export async function validateExternalUrl(url: string): Promise<{ valid: boolean; reason?: string }> {
-      try {
-        const parsedUrl = new URL(url);
-
-        // Basic protocol check (redundant with filter but good practice)
-        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-          return { valid: false, reason: 'Only HTTP and HTTPS protocols are allowed' };
-        }
-
-        // Resolve hostname to IP address for filtering
-        // Handle potential errors during DNS resolution
-        let ipAddress: string;
-        try {
-          const lookupResult = await dns.lookup(parsedUrl.hostname);
-          ipAddress = lookupResult.address;
-        } catch (dnsError) {
-          console.warn(`DNS lookup failed for ${parsedUrl.hostname}:`, dnsError);
-          // Decide policy: fail open (allow if DNS fails) or fail closed (deny)
-          // Failing closed is generally safer
-          return { valid: false, reason: `DNS lookup failed for hostname: ${parsedUrl.hostname}` };
-        }
-
-        // Use ssrf-req-filter to check the resolved IP
-        if (!ssrfFilter.check(ipAddress)) {
-           return { valid: false, reason: `Resolved IP address ${ipAddress} is not allowed` };
-        }
-
-        // Optional: Domain allowlist check
-        const ALLOWED_DOMAINS = process.env.ALLOWED_SCRAPE_DOMAINS?.split(',') || [];
-        if (ALLOWED_DOMAINS.length > 0 && !ALLOWED_DOMAINS.some(domain => parsedUrl.hostname.endsWith(domain))) {
-          return { valid: false, reason: 'Domain not in allowlist' };
-        }
-
-        return { valid: true };
-      } catch (error) {
-        if (error instanceof TypeError && error.message.includes('Invalid URL')) {
-           return { valid: false, reason: 'Invalid URL format' };
-        }
-        console.error('Unexpected error during URL validation:', error);
-        return { valid: false, reason: 'Internal validation error' };
-      }
-    }
-    ```
-
-3.  **Integrate Validation into `scrape_page` Tool:** Modify the tool handler in `src/server.ts` to call the validator before proceeding.
-
-    ```typescript
-    // src/server.ts (Inside configureToolsAndResources)
-    import { validateExternalUrl } from '../shared/urlValidator.js'; // Adjust path
-
-    // ... inside scrapePageFn or the tool registration ...
-    server.tool(
-      "scrape_page",
-      { url: z.string().url() }, // Keep Zod for basic format validation
-      async ({ url }) => {
-        // Perform SSRF validation
-        const validationResult = await validateExternalUrl(url);
-        if (!validationResult.valid) {
-          // Log the attempt for security monitoring
-          console.warn(`SSRF attempt blocked for URL: ${url}. Reason: ${validationResult.reason}`);
-          // Throw a user-friendly error
-          throw new Error(`Invalid or disallowed URL provided. Reason: ${validationResult.reason}`);
-        }
-
-        // If valid, proceed with scraping
-        console.log(`URL validated, proceeding with scrape: ${url}`); // Add logging
-        const content = await scrapePageFn({ url }); // Assuming scrapePageFn contains the actual scraping logic
-        return { content };
-      }
-    );
-    ```
-
-4.  **Configure HTTP Client Timeouts:** Set reasonable timeouts for the underlying HTTP clients used by `CheerioCrawler` and `youtube-transcript` (if possible) to prevent resource exhaustion from slow external servers. Limit redirects.
-
-    ```typescript
-    // Example for CheerioCrawler (inside scrapePageFn)
-    const crawler = new CheerioCrawler({
-      // ... requestHandler ...
-      requestHandlerTimeoutSecs: 30, // Timeout for the handler itself
-      navigationTimeoutSecs: 60,    // Timeout for page navigation/loading
-      maxRequestRetries: 2,         // Limit retries
-      maxRedirects: 5             // Limit redirects
-    });
-    ```
-
-5.  **Consider Network Isolation:** For maximum security, run the scraping logic in a separate, network-isolated container or service with strict egress rules.
-
-### 2.2 Secure Cache Admin Endpoint Authorization
-
-**Finding:** The `/mcp/cache-invalidate` endpoint relies on a potentially weak static API key (`CACHE_ADMIN_KEY`).
-
-**Location:** `src/server.ts` (lines 688-695), `.env.example` (line 21)
-
-**Impact:** Denial of Service, increased costs, potential cache manipulation.
-
-**Implementation Guidelines:**
-
-1.  **Mandate Strong Admin Key:** Ensure the `CACHE_ADMIN_KEY` environment variable is set to a strong, unpredictable, randomly generated value in production. Update documentation to emphasize this.
-
-2.  **Implement Robust Authentication Middleware:** Replace the static key check with a standard, secure authentication mechanism. Options include:
-    *   **JWT (JSON Web Tokens):** Suitable if a separate authentication service exists or can be added. Requires secure key management for signing.
-    *   **Session-Based Authentication:** Requires managing server-side sessions (e.g., using `express-session` with a secure store).
-    *   **mTLS (Mutual TLS):** Provides strong authentication if clients can manage certificates.
-
-    **Example using JWT Middleware:**
-
-    ```bash
-    npm install jsonwebtoken express-bearer-token
-    # Add @types/jsonwebtoken if needed
-    ```
-
-    ```typescript
-    // src/middleware/authAdmin.ts (New File)
-    import bearerToken from 'express-bearer-token';
-    import jwt from 'jsonwebtoken';
-
-    const JWT_SECRET = process.env.ADMIN_JWT_SECRET; // MUST be set securely
-    const JWT_ISSUER = process.env.ADMIN_JWT_ISSUER || 'mcp-server-admin';
-    const REQUIRED_ROLE = 'cache-admin'; // Define a specific role/scope
-
-    if (!JWT_SECRET) {
-      console.error('FATAL: ADMIN_JWT_SECRET environment variable is not set.');
-      // Potentially exit in production if JWT auth is mandatory
-      // process.exit(1);
-    }
-
-    export const authenticateAdmin = [
-      bearerToken(), // Extracts token from Authorization: Bearer header
-      (req: any, res: any, next: any) => {
-        if (!JWT_SECRET) {
-           // Handle case where secret is missing but server didn't exit
-           console.error('Admin JWT secret not configured, denying access.');
-           return res.status(500).json({ error: 'Server configuration error' });
-        }
-        if (!req.token) {
-          return res.status(401).json({ error: 'Unauthorized: Authentication token required' });
-        }
-
-        try {
-          const decoded = jwt.verify(req.token, JWT_SECRET, {
-            issuer: JWT_ISSUER,
-            algorithms: ['HS256'] // Specify expected algorithm
-          }) as any; // Type assertion, consider defining a proper type
-
-          // Check for required role/scope/permission
-          if (!decoded.roles || !decoded.roles.includes(REQUIRED_ROLE)) {
-             console.warn(`Forbidden access attempt: User ${decoded.sub} lacks role ${REQUIRED_ROLE}`);
-             return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
-          }
-
-          // Attach user info for potential logging downstream
-          req.adminUser = { id: decoded.sub, roles: decoded.roles };
-          next();
-
-        } catch (error) {
-          if (error instanceof jwt.TokenExpiredError) {
-            return res.status(401).json({ error: 'Unauthorized: Token expired' });
-          }
-          if (error instanceof jwt.JsonWebTokenError) {
-             console.warn(`Invalid admin token received: ${error.message}`);
-             return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-          }
-          console.error('Unexpected error during admin authentication:', error);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-      }
-    ];
-    ```
-
-    ```typescript
-    // src/server.ts (Apply middleware)
-    import { authenticateAdmin } from './middleware/authAdmin.js'; // Adjust path
-
-    // Apply to the invalidate endpoint
-    app.post("/mcp/cache-invalidate", authenticateAdmin, (req: Request, res: Response) => {
-      // Handler logic...
-    });
-
-    // Apply to other admin endpoints (see 3.1)
-    app.get("/mcp/cache-stats", authenticateAdmin, /* ... */);
-    app.get("/mcp/event-store-stats", authenticateAdmin, /* ... */);
-    app.post("/mcp/cache-persist", authenticateAdmin, /* ... */);
-    app.get("/mcp/cache-persist", authenticateAdmin, /* ... */);
-    ```
-
-3.  **Add IP Address Whitelisting:** As an additional layer, restrict access to management endpoints to specific trusted IP addresses.
-
-    ```typescript
-    // src/middleware/ipWhitelist.ts (New File)
-    export function ipWhitelistAdmin(req: any, res: any, next: any) {
-      const ALLOWED_IPS = process.env.ADMIN_ALLOWED_IPS?.split(',') || [];
-      // Ensure loopback is allowed for local testing/management
-      const defaultAllowed = ['127.0.0.1', '::1'];
-      const whitelist = [...new Set([...defaultAllowed, ...ALLOWED_IPS])]; // Combine and deduplicate
-
-      // Get client IP, considering proxies
-      const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-
-      if (!whitelist.includes(clientIp)) {
-        console.warn(`Forbidden access attempt to admin endpoint from IP: ${clientIp}`);
-        return res.status(403).json({ error: 'Forbidden: Access denied from this IP address' });
-      }
-      next();
-    }
-    ```
-
-    ```typescript
-    // src/server.ts (Apply middleware)
-    import { ipWhitelistAdmin } from './middleware/ipWhitelist.js'; // Adjust path
-
-    // Apply *before* authentication middleware
-    app.post("/mcp/cache-invalidate", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    // Apply to other admin endpoints as well...
-    ```
-
-### 2.3 Secure API Key Management
-
-**Finding:** Critical API keys are managed via environment variables / `.env` files, risking exposure.
-
-**Location:** `.env.example`, `src/server.ts` (lines 66-75, 690)
-
-**Impact:** Unauthorized API usage, increased costs, potential account compromise.
-
-**Implementation Guidelines:**
-
-1.  **Use a Secrets Management System:** Integrate with a dedicated service (e.g., HashiCorp Vault, AWS Secrets Manager, Google Secret Manager, Azure Key Vault) for storing and retrieving secrets in production.
-
-    **Example using Google Secret Manager:**
-
-    ```bash
-    npm install @google-cloud/secret-manager
-    ```
-
-    ```typescript
-    // src/config/secrets.ts (New File)
-    import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
-
-    const client = new SecretManagerServiceClient();
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT; // Ensure this is set
-
-    async function getSecretValue(secretId: string): Promise<string> {
-      if (!projectId) {
-        throw new Error('GOOGLE_CLOUD_PROJECT environment variable not set.');
-      }
-      const name = `projects/${projectId}/secrets/${secretId}/versions/latest`;
-      try {
-        console.log(`Accessing secret: ${name}`); // Log attempt
-        const [version] = await client.accessSecretVersion({ name });
-        if (!version.payload?.data) {
-          throw new Error(`Secret payload for ${secretId} is empty.`);
-        }
-        const secretValue = version.payload.data.toString('utf8');
-        console.log(`Successfully retrieved secret: ${secretId}`); // Log success
-        return secretValue;
-      } catch (error) {
-        console.error(`Failed to access secret ${secretId}:`, error);
-        // Consider more specific error handling or fallback mechanisms
-        throw new Error(`Failed to retrieve secret: ${secretId}`);
-      }
-    }
-
-    export async function loadSecrets(): Promise<Record<string, string>> {
-      // List of secret IDs stored in Secret Manager
-      const secretIds = [
-        'google-custom-search-api-key', // Use descriptive IDs in Secret Manager
-        'google-custom-search-id',
-        'google-gemini-api-key',
-        'cache-admin-key', // Optional, depending on auth method
-        'admin-jwt-secret' // If using JWT for admin auth
-      ];
-
-      const secrets: Record<string, string> = {};
-      for (const id of secretIds) {
-        // Map Secret Manager ID to environment variable name convention if needed
-        const envVarName = id.toUpperCase().replace(/-/g, '_');
-        try {
-           secrets[envVarName] = await getSecretValue(id);
-        } catch (error) {
-           // Decide how to handle missing secrets - fail fast or allow partial loading?
-           console.error(`Could not load secret ${id}. Server might not function correctly.`);
-           // For critical secrets, consider throwing the error:
-           // throw error;
-        }
-      }
-      return secrets;
-    }
-    ```
-
-    ```typescript
-    // src/server.ts (Load secrets during startup)
-    import { loadSecrets } from './config/secrets.js'; // Adjust path
-
-    async function start() {
-      try {
-        // Load secrets before initializing components that need them
-        const secrets = await loadSecrets();
-
-        // Option 1: Set process.env (less ideal, but works with existing code)
-        // Object.assign(process.env, secrets);
-
-        // Option 2: Pass secrets directly to components (preferred)
-        const googleSearchApiKey = secrets['GOOGLE_CUSTOM_SEARCH_API_KEY'];
-        // ... get other secrets ...
-
-        // Initialize components with secrets
-        // e.g., initializeGeminiClient(googleGeminiApiKey);
-        // e.g., initializeExpressApp(cacheAdminKey, adminJwtSecret);
-
-        // Validate required secrets are loaded
-        if (!googleSearchApiKey /* || other critical secrets */) {
-           throw new Error("Missing critical API keys from secrets manager.");
-        }
-
-        // Proceed with server setup...
-        const app = createApp({ /* pass secrets if needed */ });
-        // ... listen ...
-
-      } catch (error) {
-        console.error('FATAL: Failed to initialize server due to secret loading error:', error);
-        process.exit(1);
-      }
-    }
-
-    start();
-    ```
-
-2.  **Strict Access Control:** Ensure the runtime environment (server, container) has minimal privileges, only granting access to the required secrets in the management system. Use service accounts with least-privilege IAM roles.
-
-3.  **`.gitignore`:** Double-check that `.env` files and any local secret files are listed in `.gitignore`.
-
-4.  **Key Rotation:** Establish a process for regularly rotating API keys and secrets stored in the management system. Automate this process if possible.
+## 2. OAuth 2.1 Delegation Strategy
+
+The core security strategy for the MCP server's HTTP transport relies on OAuth 2.1 delegation.
+
+*   **Role:** The `google-researcher-mcp` server acts **only** as a Resource Server (RS).
+*   **Delegation:** User authentication and access token issuance are handled entirely by an external, trusted Authorization Server (AS) / Identity Provider (IdP). The MCP server **will not** implement AS endpoints like `/authorize` or `/token`.
+*   **Trust & Configuration:** The MCP server must be configured to trust the designated external AS. This involves:
+    *   Knowing the AS's `issuer` URL (e.g., `https://auth.example.com`).
+    *   Discovering the AS's JWKS URI, typically via the AS's OAuth 2.0 Authorization Server Metadata endpoint (RFC 8414) (e.g., `https://auth.example.com/.well-known/oauth-authorization-server`) or OpenID Connect Discovery endpoint (`/.well-known/openid-configuration`).
+    *   Knowing the expected `audience` identifier for the MCP server (e.g., `https://mcp.example.com/api` or a specific client ID).
+*   **Flow:**
+    1.  **Client Authentication:** The client application authenticates the user with the external AS using the Authorization Code Grant with PKCE.
+    2.  **Token Issuance:** The external AS issues an Access Token (typically a JWT) to the client upon successful authentication and authorization.
+    3.  **Client Request:** The client includes the obtained Access Token as a Bearer token in the `Authorization` header of its HTTP requests to the MCP server.
+    4.  **MCP Server Validation:** The MCP server receives the request, extracts the Bearer token, and validates it using the Token Validation Middleware (see Section 3). This includes checking the signature against the AS's public keys, issuer, audience, expiry, and required scopes.
+    5.  **Access Control:** If the token is valid and contains the necessary scopes, the MCP server processes the request. Otherwise, it returns a `401 Unauthorized` or `403 Forbidden` error.
 
 ---
 
-## 3. Medium Risk Findings & Implementation Guidelines
+## 3. Token Validation Middleware
 
-### 3.1 Secure All Management Endpoints
+A critical component is the middleware responsible for validating incoming OAuth 2.1 Bearer tokens on protected HTTP endpoints.
 
-**Finding:** Endpoints like `/mcp/cache-stats`, `/mcp/event-store-stats`, and `GET /mcp/cache-persist` lack authentication.
+**Requirements:**
 
-**Location:** `src/server.ts` (lines 596, 634, 746)
+1.  **Extraction:** Extract the Bearer token from the `Authorization` header.
+2.  **Signature Validation & Key Management:**
+    *   Verify the token's signature using the public keys of the trusted external AS.
+    *   Fetch the AS's JSON Web Key Set (JWKS) from its published JWKS URI (discovered as per Section 2).
+    *   **JWKS Caching:** Implement a robust caching strategy for the JWKS response to avoid excessive fetching. Cache keys based on the JWKS URI. Respect HTTP caching headers (`Cache-Control`, `Expires`) from the AS if provided. Have a reasonable default TTL (e.g., 1 hour) and a mechanism for proactive refresh or retry on validation failure.
+    *   **Key Identification (`kid`):** If the JWT header includes a `kid` (Key ID), use it to select the specific key from the cached JWKS for validation. If no `kid` is present, attempt validation against all keys in the set.
+    *   **Cache Invalidation & Key Rotation:** When signature validation fails with a specific `kid`, attempt to refresh the JWKS from the AS immediately. If the `kid` is not found in the refreshed JWKS, the token is invalid. If a new key set is fetched, update the cache. This helps handle key rotation gracefully.
+3.  **Issuer Validation:** Ensure the `iss` (issuer) claim in the token exactly matches the configured, trusted AS issuer URL.
+4.  **Audience Validation:** Ensure the `aud` (audience) claim contains *at least one* value that exactly matches the configured audience identifier(s) expected by the MCP server. If the `aud` claim is an array, check each element.
+5.  **Expiry Validation:** Ensure the token is within its validity period by checking `exp` (expiration time) and `nbf` (not before time, if present) claims against the current time (allowing for minor clock skew).
+6.  **Scope Validation:** Check if the token's `scope` claim contains the specific permissions required for the requested endpoint/action (see Section 4).
+7.  **Error Handling:** Return appropriate HTTP status codes (`401 Unauthorized` for missing/invalid/expired tokens, `403 Forbidden` for valid tokens lacking required scopes).
+8.  **Session Integration:** After successful validation, the authenticated user's identity (e.g., the `sub` claim from the token payload) MUST be securely associated with the MCP session state managed by the Streamable HTTP transport layer (e.g., `PersistentEventStore`). This ensures that subsequent actions within the same session are correctly attributed to the authenticated user. This might involve storing the validated claims or a user identifier within the session context accessible by the request handlers.
 
-**Impact:** Information disclosure, potential minor DoS.
+**Testing Strategy (TDD Approach):**
 
-**Implementation Guidelines:**
+*   **Unit Tests (Middleware Logic):**
+    *   Valid token with correct scope -> Success (e.g., 200 OK, middleware passes control).
+    *   Missing `Authorization` header -> Fail (401).
+    *   Non-Bearer token format -> Fail (401).
+    *   Malformed JWT -> Fail (401).
+    *   Token signed by untrusted key/algorithm -> Fail (401).
+    *   Expired token (`exp` claim) -> Fail (401).
+    *   Token used before `nbf` claim -> Fail (401).
+    *   Incorrect issuer (`iss` claim) -> Fail (401).
+    *   Incorrect/missing audience (`aud` claim) -> Fail (401).
+    *   Valid token but missing required scope -> Fail (403).
+    *   Valid token with sufficient scope -> Success.
+    *   Valid token with multiple scopes, checking subset/superset requirements.
+*   **JWKS Handling Tests:**
+    *   Successful JWKS fetching and key selection using `kid`.
+    *   JWKS caching logic (cache hit, cache miss, TTL expiry).
+    *   Handling JWKS fetch failures (network error, invalid response).
+    *   **Key Rotation Scenario:** Test successful validation after JWKS refresh due to unknown `kid`.
+*   **Mocking Strategy:**
+    *   Mock the external AS's JWKS endpoint (`/.well-known/jwks.json`) and potentially the metadata endpoint. Use libraries like `nock` or Jest's mocking capabilities to simulate different AS responses (valid keys, rotated keys, errors).
+    *   Generate test JWTs using a library (`jose`, `jsonwebtoken`) with various claims and sign them with known private keys corresponding to the mocked public keys in the JWKS.
+*   **Integration Tests:**
+    *   Set up a lightweight test AS (e.g., using `node-oidc-provider` or a similar library in a test environment) or use a dedicated test instance of the actual external AS.
+    *   Run tests where a test client obtains a real token from the test AS and uses it to call the protected MCP server endpoints. Verify end-to-end validation success and failure scenarios.
 
-*   Apply the same robust authentication middleware (e.g., `authenticateAdmin` from section 2.2.1) and IP whitelisting (section 2.2.2) to *all* management endpoints (`/mcp/*`).
+**3.1 Error Handling Strategy (AS/JWKS Issues)**
 
-    ```typescript
-    // src/server.ts
-    import { authenticateAdmin } from './middleware/authAdmin.js';
-    import { ipWhitelistAdmin } from './middleware/ipWhitelist.js';
+Robust handling of potential issues during communication with the external AS is crucial.
 
-    // Apply to all management endpoints
-    app.get("/mcp/cache-stats", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    app.get("/mcp/event-store-stats", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    app.post("/mcp/cache-invalidate", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    app.post("/mcp/cache-persist", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    app.get("/mcp/cache-persist", ipWhitelistAdmin, authenticateAdmin, /* ... */);
-    ```
+*   **AS Unavailability / JWKS Fetch Failure:**
+    *   **Initial Fetch:** If the JWKS cannot be fetched on startup or first request, the server cannot validate tokens and should likely fail startup or return `503 Service Unavailable` for initial requests needing validation, logging the error clearly.
+    *   **Runtime Fetch Failure (e.g., during refresh):** If a JWKS refresh fails during runtime (e.g., due to temporary network issues or AS downtime):
+        *   **Stale Cache:** Continue using the currently cached JWKS keys for a limited grace period (configurable, e.g., 5-15 minutes) while attempting background retries. Log warnings about using stale keys.
+        *   **Retry Mechanism:** Implement an exponential backoff retry strategy for fetching the JWKS.
+        *   **Fallback / Failure:** If retries consistently fail beyond the grace period, the server must assume the AS is unavailable. Subsequent token validations should fail (`401 Unauthorized` or potentially `503 Service Unavailable` if the failure is widespread), logging the persistent error. Avoid indefinite blocking.
+*   **Client Error Messages:**
+    *   Standard `401 Unauthorized` should be returned for most token validation failures (invalid signature, expired, bad issuer/audience). Include a `WWW-Authenticate` header if appropriate (e.g., `Bearer error="invalid_token", error_description="Token validation failed"`).
+    *   Use `403 Forbidden` specifically when the token is valid but lacks the required scopes. Include details about required scopes if permissible (`Bearer error="insufficient_scope", error_description="Requires scope 'X'"`).
+    *   Use `503 Service Unavailable` only if the MCP server itself cannot perform validation due to persistent inability to contact the AS or fetch essential configuration like the JWKS.
+*   **Logging:** Log all JWKS fetch attempts, successes, failures (with reasons), cache hits/misses, and fallback mechanism activations clearly for diagnostics.
 
-### 3.2 Secure CORS Configuration
+**Pseudo-code / Library Example (Conceptual - using Node.js with `jose`):**
 
-**Finding:** Default CORS configuration allows requests from any origin (`*`), which is insecure for production.
+```typescript
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { Request, Response, NextFunction } from 'express'; // Assuming Express
 
-**Location:** `src/server.ts` (lines 76-78, 419-426)
+const AS_ISSUER_URL = process.env.EXTERNAL_AS_ISSUER_URL;
+const MCP_SERVER_AUDIENCE = process.env.MCP_SERVER_AUDIENCE;
+const JWKS_URL = new URL(`${AS_ISSUER_URL}/.well-known/jwks.json`); // Or from discovery
 
-**Impact:** Allows untrusted websites to interact with the API from a user's browser.
+const JWKS = createRemoteJWKSet(JWKS_URL);
 
-**Implementation Guidelines:**
+async function validateToken(token: string) {
+  try {
+    const { payload, protectedHeader } = await jwtVerify(token, JWKS, {
+      issuer: AS_ISSUER_URL,
+      audience: MCP_SERVER_AUDIENCE,
+      // algorithms: ['RS256'], // Specify expected algorithms
+    });
+    return payload; // Contains claims like sub, scope, etc.
+  } catch (error) {
+    console.error('Token validation failed:', error);
+    return null;
+  }
+}
 
-1.  **Explicit Allowlist:** Define the specific origins (frontend domains) that are allowed to access the API in the `ALLOWED_ORIGINS` environment variable for production deployments. Separate multiple origins with commas.
-
-    ```bash
-    # Example .env for production
-    ALLOWED_ORIGINS=https://your-trusted-frontend.com,https://another-trusted-app.com
-    ```
-
-2.  **Refine Server Configuration:** Ensure the server code correctly parses and uses the allowlist, and avoids defaulting to `*` in production.
-
-    ```typescript
-    // src/server.ts
-    const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
-    let allowedOriginsList: string[] = [];
-
-    if (allowedOriginsEnv) {
-      allowedOriginsList = allowedOriginsEnv.split(',').map(s => s.trim()).filter(Boolean);
+export function requireScope(requiredScope: string | string[]) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
+      return res.status(401).send('Unauthorized: Missing or invalid Bearer token');
     }
 
-    // Fallback for development, but restrict in production if not set
-    if (allowedOriginsList.length === 0 && process.env.NODE_ENV !== 'development') {
-      console.warn('WARNING: No ALLOWED_ORIGINS specified in production. CORS will be highly restricted.');
-      // Optionally set a very restrictive default or leave empty to deny most cross-origin requests
-      // allowedOriginsList = ['https://emergency-access-origin.com'];
-    } else if (allowedOriginsList.length === 0 && process.env.NODE_ENV === 'development') {
-       console.log('Development mode: Allowing default localhost origins for CORS.');
-       // Add common development origins
-       allowedOriginsList = ['http://localhost:3000', 'http://127.0.0.1:3000', /* add other dev ports */];
+    const token = authHeader.substring(7); // Remove 'Bearer '
+    const payload = await validateToken(token);
+
+    if (!payload) {
+      return res.status(401).send('Unauthorized: Invalid or expired token');
     }
 
-    app.use(
-      cors({
-        origin: (origin, callback) => {
-          // Allow requests with no origin (like mobile apps or curl requests)
-          if (!origin) return callback(null, true);
+    // Scope check
+    const scopes = (payload.scope as string || '').split(' ');
+    const hasScope = Array.isArray(requiredScope)
+      ? requiredScope.every(scope => scopes.includes(scope))
+      : scopes.includes(requiredScope);
 
-          if (allowedOriginsList.indexOf(origin) !== -1) {
-            callback(null, true); // Origin is allowed
-          } else {
-            console.warn(`CORS: Blocked request from origin: ${origin}`);
-            callback(new Error('Not allowed by CORS')); // Origin is not allowed
-          }
-        },
-        methods: ["GET", "POST", "DELETE"], // Be specific
-        allowedHeaders: ["Content-Type", "Mcp-Session-Id", "Accept", "Authorization"], // Include Authorization if using JWT
-        exposedHeaders: ["Mcp-Session-Id"],
-        credentials: true // If you need to handle cookies or authorization headers
-      })
-    );
-    ```
-
-### 3.3 Enable Event Store Encryption
-
-**Finding:** Event data stored on disk by `PersistentEventStore` might be in plaintext if encryption is not explicitly enabled.
-
-**Location:** `src/shared/persistentEventStore.ts`, `src/shared/types/eventStore.ts`
-
-**Impact:** Disclosure of potentially sensitive session data if disk storage is compromised.
-
-**Implementation Guidelines:**
-
-1.  **Enable Encryption:** Configure the `PersistentEventStore` with encryption options in `src/server.ts`.
-
-    ```typescript
-    // src/server.ts (Inside HTTP+SSE setup)
-    import { PersistentEventStore } from "./shared/persistentEventStore.js";
-    import { getSecretValue } from './config/secrets.js'; // Assuming secrets management
-
-    // ... inside app.post('/mcp') for new sessions ...
-
-    // Retrieve encryption key securely
-    let eventStoreEncryptionKey: Buffer | undefined;
-    try {
-      const keyString = await getSecretValue('event-store-encryption-key'); // Get key from secrets manager
-      eventStoreEncryptionKey = Buffer.from(keyString, 'hex'); // Assuming key is stored as hex
-      if (eventStoreEncryptionKey.length !== 32) { // Validate key length for aes-256-gcm
-         throw new Error('Invalid event store encryption key length.');
-      }
-    } catch (error) {
-       console.error('FATAL: Could not load event store encryption key. Encryption disabled.', error);
-       // Decide whether to proceed without encryption or exit
+    if (!hasScope) {
+      return res.status(403).send(`Forbidden: Insufficient scope. Requires: ${requiredScope}`);
     }
 
-    const eventStore = new PersistentEventStore({
-      storagePath: opts.eventPath || path.resolve(__dirname, '..', 'storage', 'event_store'),
-      // ... other options ...
-      encryption: {
-        enabled: !!eventStoreEncryptionKey, // Enable only if key was loaded successfully
-        keyProvider: async () => {
-          if (!eventStoreEncryptionKey) {
-             // This should ideally not happen if enabled is false, but handle defensively
-             throw new Error('Encryption key is not available.');
-          }
-          return eventStoreEncryptionKey;
-        },
-        algorithm: 'aes-256-gcm' // Default, but explicit is good
-      },
-      // ... accessControl, auditLog options ...
-    });
-    ```
+    // Attach validated user info/claims to request for downstream use if needed
+    // req.user = { id: payload.sub, scopes: scopes };
 
-2.  **Secure Key Management:** Store the encryption key securely using the secrets management system (see section 2.3.1). Ensure the key has appropriate entropy (e.g., 32 bytes for AES-256).
+    next(); // Token is valid and has required scope(s)
+  };
+}
 
-3.  **Key Rotation:** Implement a strategy for rotating the event store encryption key. This is more complex as it requires re-encrypting existing data or handling multiple keys during decryption. Consider strategies like:
-    *   **Versioned Keys:** Store a key version identifier with the encrypted data and retrieve the corresponding key for decryption.
-    *   **Periodic Re-encryption:** A background process reads, decrypts with the old key, and re-encrypts with the new key.
+// Example Usage (Express route)
+// app.post('/tools/google_search/execute',
+//   requireScope('mcp:tool:google_search:execute'),
+//   handleGoogleSearchRequest
+// );
+// app.post('/admin/cache/invalidate',
+//   requireScope(['mcp:admin:cache:invalidate', 'admin']), // Example requiring multiple scopes
+//   handleCacheInvalidateRequest
+// );
+```
+**3.2 Performance Impact Assessment**
 
-### 3.4 Implement Rate Limiting
+Implementing OAuth 2.1 token validation introduces some performance overhead that should be considered and monitored:
 
-**Finding:** The application lacks rate limiting, making it vulnerable to DoS attacks via resource exhaustion.
+*   **JWKS Fetching Latency:** Initial fetching or refreshing of the JWKS involves network requests to the external AS. This latency is largely mitigated by the JWKS caching strategy (Requirement 2c), but the initial fetch and periodic refreshes will incur network overhead. Cache TTLs should balance freshness with performance.
+*   **Cryptographic Operations:** Validating the JWT signature involves cryptographic computations (e.g., RSA or ECDSA verification). While modern libraries and CPUs handle this efficiently, it adds a small CPU cost to each validated request compared to unauthenticated requests.
+*   **Library Overhead:** The chosen validation library itself will have some baseline processing overhead.
+*   **Monitoring:** It is recommended to monitor the performance impact, specifically the latency added by the validation middleware, especially under load. This can help identify bottlenecks, such as inefficient JWKS caching or excessive validation times. Metrics like P95 or P99 latency for requests passing through the middleware are valuable.
 
-**Location:** `src/server.ts` (Express routes)
-
-**Impact:** Service unavailability, increased costs.
-
-**Implementation Guidelines:**
-
-1.  **Install Rate Limiting Middleware:** Use a library like `express-rate-limit`.
-
-    ```bash
-    npm install express-rate-limit
-    ```
-
-2.  **Apply Rate Limiting:** Configure and apply the middleware to relevant routes in `src/server.ts`.
-
-    ```typescript
-    // src/server.ts
-    import rateLimit from 'express-rate-limit';
-
-    // Configure rate limiter for general API usage
-    const apiLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 1000, // Limit each IP to 1000 requests per windowMs
-      message: 'Too many requests from this IP, please try again after 15 minutes',
-      standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-      legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-      keyGenerator: (req) => {
-         // Use IP address as the key
-         return req.ip || req.socket.remoteAddress;
-      }
-    });
-
-    // Configure stricter rate limiter for sensitive/expensive operations (e.g., admin actions, scraping)
-    const sensitiveActionLimiter = rateLimit({
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 100, // Limit each IP to 100 sensitive actions per hour
-      message: 'Too many sensitive actions from this IP, please try again later',
-      standardHeaders: true,
-      legacyHeaders: false,
-       keyGenerator: (req) => req.ip || req.socket.remoteAddress
-    });
-
-    // Apply general limiter to all /mcp routes
-    app.use('/mcp', apiLimiter);
-
-    // Apply stricter limiter specifically to admin or expensive routes
-    // Note: Apply *before* the general limiter if you want it to take precedence for these routes
-    app.post("/mcp/cache-invalidate", sensitiveActionLimiter, /* ipWhitelist, authenticateAdmin, */ /* ... */);
-    // Consider applying sensitiveActionLimiter to scrape_page if abuse is a concern
-
-    // Apply general limiter to other routes if necessary
-    app.use('/events', apiLimiter);
-    ```
-
-3.  **Consider Session/User-Based Limiting:** If user authentication is implemented for general API usage, consider keying the rate limiter on session ID or user ID for more granular control.
+While generally manageable, understanding these factors is important for capacity planning and performance tuning.
 
 ---
 
-## 4. Low Risk Findings & Implementation Guidelines
+## 4. Scope Definition
 
-### 4.1 Review Information Disclosure via Statistics
+OAuth scopes define granular permissions. The following scopes are proposed for the `google-researcher-mcp` server:
 
-**Finding:** Statistics endpoints expose detailed internal metrics.
+*   **Tool Execution:**
+    *   `mcp:tool:google_search:execute`
+    *   `mcp:tool:scrape_page:execute`
+    *   `mcp:tool:analyze_with_gemini:execute`
+    *   `mcp:tool:research_topic:execute`
+    *   *(Add scopes for any future tools)*
+*   **Admin / Management:**
+    *   `mcp:admin:cache:read` (For viewing cache status/keys)
+    *   `mcp:admin:cache:invalidate` (For clearing cache entries)
+    *   `mcp:admin:config:read` (For viewing configuration)
+    *   `mcp:admin:logs:read` (For accessing server logs via an endpoint)
+    *   `admin` (A potential broader admin scope, use with caution)
 
-**Impact:** Minor information disclosure aiding reconnaissance.
-
-**Implementation Guidelines:**
-
-*   Ensure robust authentication is applied to these endpoints (see section 3.1).
-*   Review the level of detail exposed. If necessary, create different "views" of the stats based on user roles (e.g., a less detailed view for general monitoring, full details for administrators). This requires implementing role-based access control within the endpoint handlers.
-
-### 4.2 Implement Dependency Scanning
-
-**Finding:** Potential vulnerabilities in third-party dependencies.
-
-**Impact:** Varies, potentially severe.
-
-**Implementation Guidelines:**
-
-1.  **Regular Scanning:** Integrate automated dependency scanning into the CI/CD pipeline using tools like:
-    *   `npm audit` (built-in)
-    *   GitHub Dependabot alerts and security updates
-    *   Snyk
-    *   OWASP Dependency-Check
-
-2.  **Update Policy:** Establish a policy for reviewing and applying dependency updates regularly, prioritizing security patches.
-
-    ```bash
-    # Run audit regularly
-    npm audit
-
-    # Fix vulnerabilities automatically (use with caution, test thoroughly)
-    # npm audit fix --force
-    ```
-
-### 4.3 Enhance Security Logging
-
-**Finding:** Limited dedicated logging for security-relevant events.
-
-**Impact:** Difficulty in detecting and responding to security incidents.
-
-**Implementation Guidelines:**
-
-1.  **Enable Event Store Audit Logging:** Configure and enable the `auditLog` feature of `PersistentEventStore`.
-
-    ```typescript
-    // src/config/auditLogger.ts (New File - Example using console)
-    import { AuditEvent } from '../shared/types/eventStore.js'; // Adjust path
-
-    // Replace with a proper logging library (e.g., Winston, Pino) sending to a secure log aggregator
-    export async function logAuditEvent(event: AuditEvent): Promise<void> {
-      console.log(`AUDIT: ${JSON.stringify(event)}`);
-      // In production, send to a dedicated logging service/file
-      // e.g., await productionLogger.info('AUDIT', event);
-    }
-    ```
-
-    ```typescript
-    // src/server.ts (Configure PersistentEventStore)
-    import { logAuditEvent } from './config/auditLogger.js'; // Adjust path
-
-    const eventStore = new PersistentEventStore({
-      // ... other options ...
-      auditLog: {
-        enabled: true,
-        logger: logAuditEvent
-      }
-    });
-    ```
-
-2.  **Implement Application-Level Security Logging:** Add specific log entries for security-sensitive actions throughout the application:
-    *   Authentication successes and failures (especially for admin endpoints).
-    *   Authorization failures.
-    *   Detected SSRF attempts (even if blocked).
-    *   Rate limit triggers.
-    *   Significant configuration changes loaded.
-    *   Errors during cryptographic operations.
-
-    Use a structured logging format (e.g., JSON) and include relevant context (timestamp, user ID, source IP, event type, outcome).
-
-    ```typescript
-    // Example security log entry
-    // logger.warn({ event: 'auth_failure', type: 'admin_login', ip: req.ip, reason: 'invalid_token' });
-    ```
-
-3.  **Centralize Logs:** Ship logs from the application and infrastructure to a centralized, secure log management system (e.g., ELK stack, Splunk, Datadog) for analysis and alerting.
-
-### 4.4 Timing Attacks (Awareness)
-
-**Finding:** Theoretical possibility of timing attacks against crypto/cache operations.
-
-**Impact:** Extremely low likelihood of practical exploitation.
-
-**Implementation Guidelines:**
-
-*   **No Immediate Action Required:** Rely on the constant-time implementations provided by Node.js's `node:crypto` module. Standard cache lookups are generally not considered a significant timing attack vector in this context.
-*   **Awareness:** Keep this potential vector in mind if implementing custom cryptographic routines or highly sensitive lookups in the future.
+The external AS is responsible for issuing tokens containing the appropriate scopes based on user roles or client permissions. The MCP server's validation middleware enforces these scopes at the endpoint level.
 
 ---
 
-## 5. Implementation Roadmap
+## 5. Client Responsibilities
 
-A suggested prioritization for implementing these changes:
+Clients interacting with the MCP server via HTTP **must**:
 
-1.  **Phase 1 (Critical - Address Immediately):**
-    *   Implement SSRF Protection (2.1)
-    *   Secure Cache Admin Endpoint (2.2 - Start with strong key, plan for robust auth)
-    *   Secure API Key Management (2.3 - Use secrets manager in production)
-    *   Secure CORS Configuration (3.2 - Set explicit allowlist for production)
-    *   Secure All Management Endpoints (3.1 - Apply initial strong key auth)
-
-2.  **Phase 2 (High Priority):**
-    *   Implement Robust Authentication for Admin Endpoints (2.2 - JWT/Session/mTLS)
-    *   Enable Event Store Encryption (3.3 - Requires secure key management)
-    *   Implement Rate Limiting (3.4)
-    *   Implement Dependency Scanning (4.2 - Set up automated checks)
-
-3.  **Phase 3 (Medium Priority):**
-    *   Enhance Security Logging (4.3 - Enable audit logs, add specific app logs)
-    *   Review Information Disclosure via Statistics (4.1 - Assess after auth is added)
-
-4.  **Phase 4 (Ongoing):**
-    *   Regular Dependency Updates (4.2)
-    *   Regular Key Rotation (2.3)
-    *   Monitor Logs and Alerts (4.3)
+1.  **Integrate with the designated external AS/IdP.**
+2.  Implement the **OAuth 2.1 Authorization Code Grant with PKCE** flow to obtain Access Tokens.
+3.  Securely store their client credentials (if applicable, for interacting with the AS).
+4.  Include the obtained Access Token as a **Bearer token** in the `Authorization` header of every request to protected MCP server endpoints.
+5.  Handle token expiry and implement logic to refresh or re-obtain tokens as needed (typically by re-initiating the Authorization Code flow).
 
 ---
 
-## 6. Potential Challenges & Mitigations
+## 6. Metadata, DCR, and PKCE Clarification
 
-*   **SSRF Library Compatibility:** Ensure chosen SSRF libraries work correctly with the application's asynchronous nature and DNS resolution strategy.
-    *   *Mitigation:* Thoroughly test the validation logic with various valid and malicious URLs, including IP addresses and domains requiring DNS lookups.
-*   **Secrets Management Integration:** Setting up and integrating a secrets management system adds complexity to deployment and local development.
-    *   *Mitigation:* Use tools like `dotenv` for local development secrets (clearly documented as dev-only), provide clear setup instructions, and use infrastructure-as-code for managing secrets infrastructure.
-*   **Admin Authentication Implementation:** Choosing and implementing a robust authentication system (JWT, sessions) requires careful design and secure key/session management.
-    *   *Mitigation:* Leverage well-vetted libraries (e.g., `jsonwebtoken`, `express-session`), follow security best practices for key/session storage, and consider using existing identity providers if available.
-*   **Event Store Key Rotation:** Rotating the event store encryption key without downtime or data loss is complex.
-    *   *Mitigation:* Plan the rotation strategy carefully (versioned keys or background re-encryption). Implement thoroughly and test extensively before applying in production. Start with encryption enabled using the initial key.
-*   **Rate Limiting Tuning:** Finding the right balance for rate limits requires monitoring and adjustment to avoid blocking legitimate users while preventing abuse.
-    *   *Mitigation:* Start with conservative limits, monitor logs for legitimate blocks, and adjust thresholds based on observed traffic patterns. Consider different limits for different user types or endpoints.
-*   **Performance Impact:** Some security measures (e.g., stricter validation, encryption, robust authentication) might introduce minor performance overhead.
-    *   *Mitigation:* Profile the application before and after changes. Optimize critical paths. Ensure caching strategies remain effective.
+These OAuth concepts relate primarily to the client-AS interaction:
+
+*   **OAuth 2.0 Authorization Server Metadata (RFC 8414):** Defines a standard way for an AS to publish its endpoints (authorization, token, JWKS URI, etc.) and capabilities. The MCP server (RS) *may* use the AS's metadata discovery endpoint (e.g., `/.well-known/openid-configuration` or `/.well-known/oauth-authorization-server`) primarily to find the `jwks_uri`.
+*   **OAuth 2.0 Dynamic Client Registration (RFC 7591):** Allows clients to register with an AS programmatically. This is **not** relevant to the MCP server acting as an RS.
+*   **Proof Key for Code Exchange (PKCE) (RFC 7636):** A security extension for the Authorization Code Grant, mandatory in OAuth 2.1. PKCE prevents authorization code interception attacks and is handled **entirely between the client and the external AS**. The MCP server (RS) is not involved in the PKCE exchange.
+
+The MCP server, as an RS, primarily needs to know the AS's `issuer` URL and its `jwks_uri` to validate tokens.
 
 ---
 
-## 7. Troubleshooting Guide
+## 7. Transport, Batching, and Annotations
 
-*   **SSRF Blocking Legitimate URLs:**
-    *   Check `validateExternalUrl` logic, especially DNS resolution and IP range checks.
-    *   Verify the `ALLOWED_SCRAPE_DOMAINS` environment variable if used.
-    *   Inspect logs for the specific reason the URL was blocked.
-*   **Admin Endpoint Access Denied (401/403):**
-    *   Verify the authentication token (JWT validity, expiry, signature, required roles).
-    *   Check the IP whitelist configuration (`ADMIN_ALLOWED_IPS`).
-    *   Ensure the `ADMIN_JWT_SECRET` matches between token generation and verification.
-    *   Check server logs for detailed authentication/authorization errors.
-*   **Secrets Not Loading:**
-    *   Verify permissions/roles of the service account accessing the secrets manager.
-    *   Check that secret names/IDs match between the code and the secrets manager.
-    *   Ensure `GOOGLE_CLOUD_PROJECT` (or equivalent for other providers) is correctly set.
-    *   Check network connectivity between the server and the secrets management service.
-*   **CORS Errors:**
-    *   Verify the `ALLOWED_ORIGINS` environment variable exactly matches the `Origin` header sent by the browser (including protocol, domain, and port).
-    *   Check the browser's developer console for specific CORS error messages.
-    *   Ensure the `cors` middleware is configured correctly in `src/server.ts`.
-*   **Event Store Decryption Errors:**
-    *   Verify the correct encryption key is being provided by the `keyProvider`.
-    *   Ensure the key format (e.g., hex, base64) matches between storage and retrieval.
-    *   Check that the algorithm (`aes-256-gcm`) and IV/authTag handling are correct.
-    *   Consider potential data corruption in the stored event files.
-*   **Legitimate Users Being Rate Limited:**
-    *   Review the rate limit configuration (`windowMs`, `max`).
-    *   Check logs to identify which users/IPs are hitting the limit.
-    *   Consider increasing limits or using a more granular key (e.g., user ID + IP).
+*   **Transport:** OAuth 2.1 Bearer token validation applies specifically to the **HTTP transport**. Stdio transport security relies on the inherent security of the local machine environment.
+*   **Batching:** For batched HTTP requests, the Bearer token validation MUST be performed **once** for the incoming batch request. If valid, all operations within the batch are processed under the authority granted by the token.
+*   **Annotations:** Security annotations within the MCP protocol definition are complementary. They can provide fine-grained policy hints but do not replace the fundamental transport-level security provided by OAuth 2.1.
 
 ---
 
-## 8. References & Resources
+## 8. High Risk Findings & Mitigation
 
+### 8.1 Server-Side Request Forgery (SSRF) - `scrape_page` Tool
+
+*   **Risk:** The `scrape_page` tool takes a URL as input. A malicious user could provide URLs pointing to internal network resources or cloud metadata services.
+*   **Mitigation:**
+    *   **Strict Allowlist:** Maintain a strict, configurable allowlist of permitted domain names or IP address ranges for scraping. Deny all others.
+    *   **Input Validation:** Validate the URL format rigorously.
+    *   **Network Segregation:** Run the scraping process in a restricted network environment if possible.
+    *   **Disable Redirects:** Configure the HTTP client used for scraping to disable following redirects by default, or limit redirect depth and scope.
+    *   **TDD:** Test cases for allowed URLs, disallowed private/internal IPs (e.g., `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback addresses (`127.0.0.1`, `::1`), link-local addresses (`169.254.0.0/16`), common cloud metadata service IPs (e.g., `169.254.169.254`), `file://` protocol attempts, and other non-HTTP schemes.
+
+### 8.2 Secure Management Endpoints (HTTP)
+
+*   **Risk:** Unauthenticated or improperly authorized access to administrative endpoints (e.g., cache management, configuration viewing).
+*   **Mitigation:**
+    *   **Mandatory OAuth 2.1:** All HTTP management endpoints **MUST** be protected by the OAuth 2.1 Token Validation Middleware (Section 3).
+    *   **Scope Enforcement:** Each management endpoint MUST require specific, granular admin scopes (e.g., `mcp:admin:cache:invalidate`, `mcp:admin:config:read`). Access should be denied if the validated token lacks the required scope(s).
+    *   **Remove Static Keys:** Eliminate reliance on static API keys (like `CACHE_ADMIN_KEY`) for securing HTTP endpoints. These are superseded by OAuth.
+    *   **IP Whitelisting (Optional Layer):** As an *additional* defense-in-depth measure, configure IP address whitelisting for management endpoints, restricting access to known administrative IPs *in addition* to OAuth validation.
+    *   **TDD:** Test cases for accessing admin endpoints with valid admin tokens (correct scope), valid user tokens (wrong scope -> 403), invalid tokens (-> 401), no token (-> 401), and requests from allowed/disallowed IPs (if IP whitelisting is used).
+
+### 8.3 Secure API Key & Secret Management
+
+*   **Risk:** Exposure of sensitive credentials like external service API keys (Google Search, Gemini) or the OAuth client secret used by the *client* (not the RS) to communicate with the external AS.
+*   **Mitigation:**
+    *   **Secrets Manager:** Store all secrets (external API keys, potentially database credentials, etc.) in a dedicated secrets management system (e.g., HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager, environment variables loaded securely). **Do not** hardcode secrets in source code or configuration files.
+    *   **Environment Variables:** Use environment variables for configuration, loaded securely at runtime.
+    *   **Least Privilege:** Ensure API keys have the minimum necessary permissions.
+    *   **Rotation:** Implement regular rotation policies for all secrets and keys.
+    *   **Access Control:** Strictly limit access to the secrets management system.
+    *   **RS Perspective:** The MCP server acting as an RS typically does *not* need a client secret for token validation (it uses the AS's public keys). Secret management primarily applies to keys *used by* the MCP server to call *other* services.
+    *   **TDD:** While direct testing of external secret managers is complex, test that the application correctly loads configuration/secrets from environment variables or the expected source, and fails gracefully if secrets are missing.
+
+---
+
+## 9. Medium Risk Findings & Mitigation
+
+### 9.1 Cross-Origin Resource Sharing (CORS)
+
+*   **Risk:** Browsers may block web-based clients from calling the MCP server API due to CORS policy restrictions. Improperly configured CORS can expose the API to unintended origins.
+*   **Mitigation:**
+    *   **Configure CORS Middleware:** Implement CORS middleware (e.g., `cors` package in Node.js).
+    *   **Restrict Origins:** Configure a strict allowlist of permitted client origins (`Access-Control-Allow-Origin`). Avoid using wildcard (`*`) in production unless the API is truly public.
+    *   **Allow Methods/Headers:** Explicitly allow necessary HTTP methods (`GET`, `POST`, `OPTIONS`, etc.) via `Access-Control-Allow-Methods`.
+    *   **Allow `Authorization` Header:** Crucially, ensure the `Authorization` header is included in `Access-Control-Allow-Headers` to permit Bearer tokens to be sent.
+    *   **Handle Preflight Requests:** Ensure the server correctly handles `OPTIONS` preflight requests.
+    *   **TDD:** Test CORS headers for requests from allowed origins, disallowed origins, and preflight (`OPTIONS`) requests. Verify `Authorization` is in `Access-Control-Allow-Headers`.
+
+### 9.2 Event Store Encryption
+
+*   **Risk:** Sensitive data persisted in the event store (if used) could be exposed if the storage medium is compromised.
+*   **Mitigation:**
+    *   **Encryption at Rest:** Ensure the underlying storage system (filesystem, database) provides encryption at rest.
+    *   **Application-Level Encryption (Optional):** For highly sensitive event payloads, consider application-level encryption *before* persisting events, using strong algorithms and secure key management (leveraging the secrets management system). This adds complexity but provides stronger protection.
+    *   **TDD:** If implementing application-level encryption, test the encryption/decryption process thoroughly, including key handling and error scenarios.
+
+### 9.3 Rate Limiting
+
+*   **Risk:** Denial-of-service (DoS) attacks or resource exhaustion due to excessive requests from a single client or IP address.
+*   **Mitigation:**
+    *   **Implement Rate Limiting Middleware:** Use robust rate-limiting middleware (e.g., `express-rate-limit` in Node.js).
+    *   **Keying Strategy:**
+        *   **Authenticated Requests:** Key rate limits primarily off the validated user identifier (`sub` claim) or client identifier (`client_id` or `azp` claim) extracted from the OAuth token. This provides fairer limiting per user/client.
+        *   **Unauthenticated Requests / Fallback:** Use the source IP address as a secondary or fallback key.
+    *   **Configurable Limits:** Make limits (e.g., requests per minute per user/IP) configurable.
+    *   **Appropriate Response:** Return `429 Too Many Requests` status code when limits are exceeded.
+    *   **TDD:** Test that rate limits are enforced correctly for different keys (user ID, IP), that headers like `Retry-After` are set, and that legitimate traffic below the limit is unaffected.
+
+---
+
+## 10. Low Risk Findings & Mitigation
+
+### 10.1 Dependency Vulnerability Management
+
+*   **Risk:** Using outdated or vulnerable third-party libraries.
+*   **Mitigation:**
+    *   **Regular Scanning:** Use tools like `npm audit`, `yarn audit`, Snyk, Dependabot to regularly scan for known vulnerabilities.
+    *   **Update Strategy:** Keep dependencies updated, prioritizing security patches.
+    *   **CI/CD Integration:** Integrate vulnerability scanning into the CI/CD pipeline to catch issues early.
+
+### 10.2 Input Validation
+
+*   **Risk:** Malformed or malicious input causing errors or potential exploits (beyond SSRF).
+*   **Mitigation:**
+    *   **Validate All Inputs:** Rigorously validate all inputs from clients and external sources (tool arguments, configuration values).
+    *   **Use Libraries:** Leverage validation libraries (e.g., Zod, Joi, class-validator) to define and enforce schemas.
+    *   **Type Checking:** Utilize TypeScript or static analysis for type safety.
+    *   **TDD:** Write tests for valid and invalid input scenarios for all endpoints and tool parameters.
+
+### 10.3 Enhanced Logging & Monitoring
+
+*   **Risk:** Insufficient logging makes diagnosing issues and detecting security incidents difficult.
+*   **Mitigation:**
+    *   **Structured Logging:** Implement structured logging (e.g., JSON format).
+    *   **Key Events:** Log critical events:
+        *   Application start/stop.
+        *   Incoming requests (method, path, source IP, user agent).
+        *   **OAuth Token Validation:** Log successes and failures. For failures, log the specific reason (e.g., expired, invalid signature, invalid issuer, invalid audience, missing scope, JWKS fetch error). **Do not log the token itself.**
+        *   **Successful Validation Details:** Log the validated user identifier (`sub` claim), client identifier (`client_id` or `azp` if available), and the granted scopes for successfully authenticated requests.
+        *   **JWKS Management:** Log JWKS fetching events (attempts, success, failure), cache updates, and key rotation handling.
+        *   Tool execution start/end/errors.
+        *   Cache hits/misses/invalidations.
+        *   Errors and exceptions (with stack traces).
+        *   Rate limit events.
+        *   CORS errors.
+    *   **Avoid Logging Secrets:** Ensure sensitive data (passwords, full tokens, API keys) is **never** logged. Log token validation *results*, not the token itself.
+    *   **Centralized Logging:** Ship logs to a centralized logging system (e.g., ELK stack, Splunk, Datadog) for analysis and alerting.
+    *   **Monitoring:** Monitor key metrics (request latency, error rates, resource utilization) and set up alerts for anomalies.
+
+### 10.4 Least Privilege Principle
+
+*   **Risk:** Components or processes running with more permissions than necessary.
+*   **Mitigation:**
+    *   **Service Accounts:** Run the MCP server process under a dedicated, non-privileged user account.
+    *   **File Permissions:** Ensure appropriate file system permissions for application files and data directories.
+    *   **OAuth Scopes:** Enforce granular scopes via OAuth (as detailed above).
+    *   **External Keys:** Ensure API keys used by the server have the minimum required permissions for their respective services.
+
+---
+
+## 11. Implementation Roadmap (TDD Focused)
+
+Prioritize implementation based on risk and dependencies. Employ Test-Driven Development (TDD) throughout.
+
+1.  **[P0] OAuth 2.1 Token Validation Middleware (HTTP):**
+    *   **TDD:** Write tests covering all validation scenarios (valid, invalid, expired, scope checks, errors - see Section 3).
+    *   Implement middleware using a robust JWT/JOSE library.
+    *   Integrate JWKS fetching from the external AS.
+    *   Configure required environment variables (Issuer URL, Audience).
+    *   Apply middleware to *all* relevant HTTP endpoints (tools, admin).
+2.  **[P0] Secure Management Endpoints:**
+    *   **TDD:** Write tests ensuring admin endpoints require specific OAuth scopes (Section 8.2).
+    *   Apply `requireScope` middleware (from Step 1) with appropriate admin scopes.
+    *   Remove any legacy static key checks for HTTP endpoints.
+    *   (Optional) Implement and test IP whitelisting as an additional layer.
+3.  **[P1] Secrets Management:**
+    *   **TDD:** Test configuration loading from environment variables/secrets manager.
+    *   Integrate with chosen secrets management solution.
+    *   Ensure no secrets are hardcoded.
+    *   Update deployment process to inject secrets securely.
+4.  **[P1] SSRF Mitigation (`scrape_page`):**
+    *   **TDD:** Write tests for URL validation and allowlist/denylist logic (Section 8.1).
+    *   Implement strict URL validation and domain/IP allowlisting.
+5.  **[P1] CORS Configuration:**
+    *   **TDD:** Write tests for CORS headers and preflight requests (Section 9.1).
+    *   Implement/configure CORS middleware, ensuring `Authorization` header is allowed.
+6.  **[P2] Rate Limiting:**
+    *   **TDD:** Write tests for rate limiting logic based on token claims and IP (Section 9.3).
+    *   Implement/configure rate limiting middleware.
+7.  **[P2] Enhanced Logging:**
+    *   Implement structured logging.
+    *   Add detailed logs for OAuth validation, scope checks, and other key events (Section 10.3).
+    *   Ensure no secrets are logged.
+    *   Integrate with centralized logging system.
+8.  **[P2] Input Validation:**
+    *   **TDD:** Add/improve input validation tests for all tool parameters and API inputs.
+    *   Implement schema validation using appropriate libraries.
+9.  **[P3] Event Store Encryption (If Applicable):**
+    *   Assess need for application-level encryption.
+    *   **TDD:** If implementing, test encryption/decryption logic.
+    *   Implement encryption or ensure storage-level encryption is active.
+10. **[P3] Dependency Vulnerability Management:**
+    *   Integrate automated scanning (e.g., `npm audit`, Dependabot) into CI/CD.
+    *   Establish process for reviewing and applying updates.
+
+**Note:** Implementing AS-specific features (e.g., `/authorize`, `/token` endpoints) is **out of scope** for this server.
+
+---
+
+## 12. Potential Challenges
+
+*   **External AS Integration:** Configuring trust, understanding the specific AS's behavior (claim names, discovery endpoint quirks), and managing communication issues (e.g., JWKS fetching failures).
+*   **Choosing/Configuring Libraries:** Selecting appropriate, well-maintained libraries for JWT validation (`jose`, `jsonwebtoken`, etc.) and configuring them correctly (algorithms, clock skew tolerance).
+*   **Scope Definition & Management:** Defining a clear, consistent set of scopes and coordinating with the external AS and client developers.
+*   **Token Expiry/Refresh (RS Perspective):** The RS simply validates tokens. Clients are responsible for handling expiry and obtaining new tokens. The challenge is ensuring clients implement this correctly. Clear documentation for client developers is key.
+*   **JWKS Key Rotation:** Handling rotation of the AS's signing keys gracefully requires robust JWKS fetching, caching (with appropriate TTLs and refresh-on-failure logic), and `kid` handling (see Section 3).
+*   **Testing Complexity:** Mocking the external AS (JWKS endpoint, metadata) and JWT validation effectively for TDD requires careful setup (see Section 3 Testing Strategy).
+
+---
+
+## 13. Troubleshooting
+
+*   **`401 Unauthorized` Errors:**
+    *   Check if `Authorization: Bearer <token>` header is present and correctly formatted.
+    *   Verify the token hasn't expired (`exp` claim).
+    *   Verify the token signature using the AS's *current* public keys (check JWKS endpoint).
+    *   Verify the `iss` claim matches the configured AS issuer URL.
+    *   Verify the `aud` claim includes the MCP server's audience identifier.
+    *   Check for clock skew between RS and AS.
+    *   Check server logs for specific validation error details.
+*   **`403 Forbidden` Errors:**
+    *   Token is valid, but lacks the required scope(s) for the endpoint.
+    *   Verify the `scope` claim in the decoded token.
+    *   Check the `requireScope` middleware configuration for the specific route.
+    *   Confirm with the AS administrator that the user/client should have the required scope.
+*   **JWKS Fetching Issues:**
+    *   Verify network connectivity from the MCP server to the AS's JWKS URI.
+    *   Check if the JWKS URI is correct (often found via the AS's discovery endpoint).
+    *   Check for firewall rules blocking access.
+*   **CORS Errors (in Client Browser):**
+    *   Check the server's CORS configuration (`Access-Control-Allow-Origin`, `Access-Control-Allow-Headers`). Ensure `Authorization` is allowed in headers.
+    *   Verify the client's origin is in the allowed list.
+    *   Check browser console for specific CORS error messages.
+
+---
+
+## 14. References
+
+*   **OAuth 2.1:** (Draft specification - combines and updates core RFCs) - [https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-07](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-07) (Note: Check for latest draft version)
+*   **OAuth 2.0 Core (Foundation):** RFC 6749 - [https://tools.ietf.org/html/rfc6749](https://tools.ietf.org/html/rfc6749)
+*   **OAuth 2.0 Bearer Token Usage:** RFC 6750 - [https://tools.ietf.org/html/rfc6750](https://tools.ietf.org/html/rfc6750)
+*   **Proof Key for Code Exchange (PKCE):** RFC 7636 - [https://tools.ietf.org/html/rfc7636](https://tools.ietf.org/html/rfc7636)
+*   **JSON Web Token (JWT):** RFC 7519 - [https://tools.ietf.org/html/rfc7519](https://tools.ietf.org/html/rfc7519)
+*   **JSON Web Key (JWK):** RFC 7517 - [https://tools.ietf.org/html/rfc7517](https://tools.ietf.org/html/rfc7517)
+*   **JSON Web Signature (JWS):** RFC 7515 - [https://tools.ietf.org/html/rfc7515](https://tools.ietf.org/html/rfc7515)
+*   **OAuth 2.0 Authorization Server Metadata:** RFC 8414 - [https://tools.ietf.org/html/rfc8414](https://tools.ietf.org/html/rfc8414)
+*   **OAuth 2.0 Dynamic Client Registration:** RFC 7591 - [https://tools.ietf.org/html/rfc7591](https://tools.ietf.org/html/rfc7591)
 *   **OWASP Top 10:** [https://owasp.org/www-project-top-ten/](https://owasp.org/www-project-top-ten/)
-*   **OWASP SSRF Prevention Cheat Sheet:** [https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
-*   **Node.js Security Best Practices:** [https://nodejs.org/en/docs/guides/security/](https://nodejs.org/en/docs/guides/security/)
-*   **Express Security Best Practices:** [https://expressjs.com/en/advanced/best-practice-security.html](https://expressjs.com/en/advanced/best-practice-security.html)
-*   **JWT Handbook:** [https://jwt.io/introduction/](https://jwt.io/introduction/)
-*   **Google Cloud Secret Manager:** [https://cloud.google.com/secret-manager/docs](https://cloud.google.com/secret-manager/docs)
-*   **ssrf-req-filter library:** [https://www.npmjs.com/package/ssrf-req-filter](https://www.npmjs.com/package/ssrf-req-filter)
-*   **express-rate-limit library:** [https://www.npmjs.com/package/express-rate-limit](https://www.npmjs.com/package/express-rate-limit)
-*   **CORS (Cross-Origin Resource Sharing):** [https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)
+*   **OWASP Server-Side Request Forgery Prevention Cheat Sheet:** [https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
