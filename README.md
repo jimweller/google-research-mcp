@@ -189,7 +189,7 @@ console.log(result.content[0].text);
 
 1. Enable MCP Servers in Roo Code settings
 2. Create `.roo/mcp.json` in your project:
-   ```json
+  ```json
    {
     "mcpServers": {
       "google-researcher-mcp": {
@@ -211,7 +211,7 @@ console.log(result.content[0].text);
       }
     }
   }
-  ```
+  ```  
 3. Start the server and use Roo Code to ask research questions
 
 ## Tests
