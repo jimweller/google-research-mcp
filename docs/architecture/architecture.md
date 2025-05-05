@@ -150,30 +150,44 @@ The server supports two communication methods:
   - Creates a new session for each client with its own MCP server instance
   - Uses SSE for streaming responses back to clients
   - Supports session resumption via the Event Store
-- **When to use it**: For web clients or any client preferring HTTP
+  - **Security**: All HTTP interactions are secured using **OAuth 2.1 Bearer tokens**. Clients must obtain tokens from an external Authorization Server and include them in the `Authorization` header. The server validates these tokens.
+- **When to use it**: For web clients or any client preferring HTTP that can handle OAuth 2.1 flows.
 - **Key code**:
   ```typescript
-  // src/server.ts (simplified)
-  app.post("/mcp", async (req, res) => {
-    // Check for session ID
-    const sidHeader = req.headers["mcp-session-id"];
-    let transport = sidHeader ? sessions[sidHeader] : undefined;
-    
-    // Create new session if needed
-    if (!transport && isInitializeRequest(req.body)) {
-      const eventStore = new PersistentEventStore({...});
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        eventStore
-      });
-      const sessionServer = new McpServer({...});
-      configureToolsAndResources(sessionServer);
-      await sessionServer.connect(transport);
+  // src/server.ts (simplified initialization and request handling)
+  
+  // Global instances initialized first
+  await initializeGlobalInstances();
+  
+  // OAuth options (e.g., from environment variables)
+  const oauthOpts = { issuerUrl: '...', audience: '...' };
+  
+  // Create Express app and HTTP transport (passing global instances and OAuth options)
+  const { app, httpTransport } = await createAppAndHttpTransport(
+    globalCacheInstance,
+    eventStoreInstance,
+    oauthOpts
+  );
+  
+  // Middleware applies OAuth validation
+  app.use('/mcp', oauthMiddleware(oauthOpts)); // Simplified example
+  
+  // Request handling delegates to the transport instance
+  app.post("/mcp", async (req, res, next) => {
+    try {
+      // OAuth middleware runs first (not shown here)
+      await httpTransport.handleRequest(req, res, req.body);
+    } catch (err) {
+      next(err);
     }
-    
-    // Handle request
-    await transport.handleRequest(req, res, req.body);
   });
+  
+  // Management endpoints also use OAuth middleware with specific scopes
+  app.get("/mcp/cache-stats",
+    oauthMiddleware(oauthOpts),
+    requireScopes(['mcp:admin:cache:read']),
+    (req, res) => { /* handler */ }
+  );
   ```
 
 ### MCP Server Core
@@ -344,10 +358,15 @@ The Event Store (`src/shared/`) enables session resumption for clients using the
 
 The server provides HTTP endpoints for monitoring and managing the cache and event store:
 
+**Note:** Access to these endpoints is secured via OAuth 2.1 and requires specific administrative scopes (e.g., `mcp:admin:cache:read`). See the [Security Improvements Guide](../plans/security-improvements-implementation-guide.md#4-scope-definition) for details.
+
 - `GET /mcp/cache-stats`: Returns cache statistics (size, hits, misses, etc.)
 - `GET /mcp/event-store-stats`: Returns event store statistics
 - `POST /mcp/cache-invalidate`: Invalidates specific cache entries or clears the entire cache
 - `POST /mcp/cache-persist` / `GET /mcp/cache-persist`: Forces immediate persistence of cache entries
+- `GET /mcp/oauth-scopes`: Provides documentation for available OAuth scopes
+- `GET /mcp/oauth-config`: Returns the server's OAuth configuration
+- `GET /mcp/oauth-token-info`: Returns information about the authenticated user's token (requires authentication)
 
 ## 5. Getting Started
 
