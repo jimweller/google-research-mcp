@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration:**
     - Server now requires `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` environment variables when using HTTP transport security.
     - *Files*: `.env.example` (implicitly), `src/server.ts`
+- **Build Process Improvements:**
+  - Converted `src/shared/oauthScopesDocumentation.js` to TypeScript (`src/shared/oauthScopesDocumentation.ts`)
+  - Removed the `copy-js-files.js` build step
+  - Simplified the build process to use TypeScript's compiler directly
+  - *Files*: `src/shared/oauthScopesDocumentation.ts`, `package.json`
 
 ### Removed
 - Removed static API key check (`CACHE_ADMIN_KEY`) previously used for HTTP management endpoints (`/mcp/cache-invalidate`, `/mcp/cache-persist`). Access is now controlled solely via OAuth scopes (`mcp:admin:cache:invalidate`, `mcp:admin:cache:persist`).
