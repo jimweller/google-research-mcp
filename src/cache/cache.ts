@@ -53,14 +53,23 @@ export class Cache {
     this.defaultTTL = options.defaultTTL || 5 * 60 * 1000; // 5 minutes default
     this.maxSize = options.maxSize || 1000; // Default max 1000 entries
     
-    // Periodically clean expired entries
-    this.cleanupIntervalId = setInterval(() => {
-      try {
-        this.cleanExpiredEntries();
-      } catch (error) {
-        console.error("Error during periodic cache cleanup:", error);
+    // Periodically clean expired entries, but not in test environment
+    if (process.env.NODE_ENV !== 'test') {
+      this.cleanupIntervalId = setInterval(() => {
+        try {
+          this.cleanExpiredEntries();
+        } catch (error) {
+          console.error("Error during periodic cache cleanup:", error);
+        }
+      }, 60 * 1000); // Every minute
+
+      // Ensure the timer doesn't prevent the process from exiting
+      if (this.cleanupIntervalId?.unref) {
+        this.cleanupIntervalId.unref();
       }
-    }, 60 * 1000); // Every minute
+    } else {
+      this.cleanupIntervalId = null; // Ensure it's null in tests
+    }
   }
 
   /**

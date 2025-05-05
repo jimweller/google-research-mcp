@@ -86,7 +86,9 @@ export class PersistentEventStore implements EventStore {
       misses: 0,
       totalRequests: 0
     };
-    
+
+    // console.log(`Loaded ${this.events.length} events from disk`); // Removed for test hygiene
+
     // Set up the persistence callback
     this.persistenceManager.setOnPersistCallback(() => Promise.resolve(this.memoryStore));
     
@@ -111,7 +113,7 @@ export class PersistentEventStore implements EventStore {
     try {
       const events = await this.persistenceManager.loadEvents();
       this.memoryStore = events;
-      console.log(`Loaded ${events.size} events from disk`);
+      // console.log(`Loaded ${events.size} events from disk`); // Removed for test hygiene
     } catch (error) {
       console.error('Failed to load events from disk:', error);
     }
@@ -500,7 +502,9 @@ export class PersistentEventStore implements EventStore {
    */
   async dispose(): Promise<void> {
     try {
-      console.log('Disposing PersistentEventStore...');
+      if (process.env.NODE_ENV !== 'test') {
+        console.log('Disposing PersistentEventStore...');
+      }
     } catch (_) {
       // Ignore console errors during shutdown
     }
@@ -510,7 +514,9 @@ export class PersistentEventStore implements EventStore {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
       try {
-        console.log('Event cleanup timer stopped.');
+        if (process.env.NODE_ENV !== 'test') {
+          console.log('Event cleanup timer stopped.');
+        }
       } catch (_) {
         // Ignore console errors during shutdown
       }
@@ -520,7 +526,9 @@ export class PersistentEventStore implements EventStore {
     try {
       await this.persistToDisk();
       try {
-        console.log('Final event persistence successful during disposal.');
+        if (process.env.NODE_ENV !== 'test') {
+          console.log('Final event persistence successful during disposal.');
+        }
       } catch (_) {
         // Ignore console errors during shutdown
       }
@@ -556,7 +564,9 @@ export class PersistentEventStore implements EventStore {
     });
 
     try {
-      console.log('PersistentEventStore disposed.');
+      if (process.env.NODE_ENV !== 'test') {
+        console.log('PersistentEventStore disposed.');
+      }
     } catch (_) {
       // Ignore console errors during shutdown
     }

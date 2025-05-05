@@ -102,18 +102,18 @@ export class PersistentCache extends Cache {
    * @private
    */
   private async initialize(): Promise<void> {
-    console.log('[Initialize] Starting initialization...'); // DEBUG LOG
+    // console.log('[Initialize] Starting initialization...'); // DEBUG LOG - Removed for test hygiene
     try {
       if (this.eagerLoading) {
-        console.log('[Initialize] Eager loading enabled.'); // DEBUG LOG
+        // console.log('[Initialize] Eager loading enabled.'); // DEBUG LOG - Removed for test hygiene
         try {
           // Load all entries at once
-          console.log('[Initialize] Loading all entries from persistence manager...'); // DEBUG LOG
+          // console.log('[Initialize] Loading all entries from persistence manager...'); // DEBUG LOG - Removed for test hygiene
           const entries = await this.persistenceManager.loadAllEntries();
-          console.log(`[Initialize] Loaded ${entries.size} namespaces from persistence manager.`); // DEBUG LOG
+          // console.log(`[Initialize] Loaded ${entries.size} namespaces from persistence manager.`); // DEBUG LOG - Removed for test hygiene
 
           // Add entries to the in-memory cache
-          console.log('[Initialize] Populating in-memory cache...'); // DEBUG LOG
+          // console.log('[Initialize] Populating in-memory cache...'); // DEBUG LOG - Removed for test hygiene
           for (const [namespace, namespaceEntries] of entries.entries()) {
             // Create namespace map if it doesn't exist
             if (!this.namespaceCache.has(namespace)) {
@@ -137,13 +137,13 @@ export class PersistentCache extends Cache {
           }
 
           try {
-            console.log(`Loaded ${this.getEntryCount()} entries from persistent storage`);
+            // console.log(`Loaded ${this.getEntryCount()} entries from persistent storage`); // Removed for test hygiene
           } catch (_) {
             // Ignore console errors during shutdown
           }
         } catch (loadError) {
           try {
-            console.error('Error loading entries from persistent storage:', loadError);
+            console.error('Error loading entries from persistent storage:', loadError); // Keep error log
           } catch (_) {
             // Ignore console errors during shutdown
           }
@@ -152,16 +152,16 @@ export class PersistentCache extends Cache {
       }
 
       // Start persistence timer if needed
-      console.log('[Initialize] Starting persistence timer...'); // DEBUG LOG
+      // console.log('[Initialize] Starting persistence timer...'); // DEBUG LOG - Removed for test hygiene
       this.startPersistenceTimer();
 
       // Mark initialization as complete
       this.isInitialized = true;
-      console.log('[Initialize] Initialization complete.'); // DEBUG LOG
+      // console.log('[Initialize] Initialization complete.'); // DEBUG LOG - Removed for test hygiene
     } catch (error) {
-      console.error('[Initialize] Error during initialization:', error); // DEBUG LOG
+      // console.error('[Initialize] Error during initialization:', error); // DEBUG LOG - Removed for test hygiene
       try {
-        console.error('Error initializing persistent cache:', error);
+        console.error('Error initializing persistent cache:', error); // Keep actual error log
       } catch (_) {
         // Ignore console errors during shutdown
       }
@@ -278,6 +278,11 @@ export class PersistentCache extends Cache {
    * @private
    */
   private startPersistenceTimer(): void {
+    // Do not start the timer in the test environment to prevent open handles
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+
     const interval = this.persistenceStrategy.getPersistenceInterval();
 
     if (interval !== null && interval > 0) {
@@ -442,7 +447,7 @@ export class PersistentCache extends Cache {
 
     // If found in memory, check if it's expired (it might be stale but valid)
     if (entry && entry.expiresAt <= this.now() && (!entry.staleUntil || entry.staleUntil <= this.now())) {
-        console.log(`[GetPersistence] Found expired entry in memory: ${fullKey}`); // DEBUG LOG
+        // console.log(`[GetPersistence] Found expired entry in memory: ${fullKey}`); // DEBUG LOG - Removed for test hygiene
         entry = undefined; // Treat expired entry as not found in memory
         this.cache.delete(fullKey); // Clean up expired entry from memory explicitly
         this.accessLog.delete(fullKey);
@@ -450,10 +455,10 @@ export class PersistentCache extends Cache {
 
     // If not found in memory (or was expired) AND not eager loading, try disk
     if (!entry && !this.eagerLoading) {
-      console.log(`[GetPersistence] Not in memory, trying disk: ${fullKey}`); // DEBUG LOG
+      // console.log(`[GetPersistence] Not in memory, trying disk: ${fullKey}`); // DEBUG LOG - Removed for test hygiene
       try {
         const persistedEntry = await this.persistenceManager.loadEntry(namespace, hashedKey); // Load using hashedKey
-        console.log(`[GetPersistence] Loaded from disk for ${fullKey}:`, persistedEntry ? 'found' : 'not found'); // DEBUG LOG
+        // console.log(`[GetPersistence] Loaded from disk for ${fullKey}:`, persistedEntry ? 'found' : 'not found'); // DEBUG LOG - Removed for test hygiene
 
         // If found on disk, add to in-memory cache
         if (persistedEntry) {
@@ -474,11 +479,11 @@ export class PersistentCache extends Cache {
           }
           this.namespaceCache.get(namespace)!.set(hashedKey, persistedEntry);
 
-          try {
-            console.log(`Loaded cache entry ${namespace}:${hashedKey} from disk`);
-          } catch (_) {
-            // Ignore console errors during shutdown
-          }
+          // try {
+          //   console.log(`Loaded cache entry ${namespace}:${hashedKey} from disk`); // Removed for test hygiene
+          // } catch (_) {
+          //   // Ignore console errors during shutdown
+          // }
         }
       } catch (error) {
         try {
@@ -567,7 +572,7 @@ export class PersistentCache extends Cache {
       // Value is stale but still usable - trigger background refresh
       this.metrics.hits++; // FIX: Increment hits (stale hit) (metrics is now protected)
       try {
-        console.log(`Serving stale content for ${namespace} while revalidating`);
+        // console.log(`Serving stale content for ${namespace} while revalidating`); // Removed for test hygiene
       } catch (_) {
         // Ignore console errors during shutdown
       }
@@ -637,11 +642,11 @@ export class PersistentCache extends Cache {
       const fullKey = this.generateFullKey(namespace, key);
       this.set(fullKey, entry);
 
-      try {
-        console.log(`Background revalidation completed for ${namespace}`);
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log(`Background revalidation completed for ${namespace}`); // Removed for test hygiene
+      // } catch (_) {
+      //   // Ignore console errors during shutdown
+      // } // Corrected closing brace placement
     } catch (error) {
       // Log but don't throw - this is a background operation
       try {
@@ -738,20 +743,20 @@ export class PersistentCache extends Cache {
   async persistToDisk(): Promise<void> {
     // Check dirty flag first
     if (!this.isDirty) {
-      try {
-        // console.log('Cache is not dirty, skipping persistence'); // Reduce noise
-      } catch (error) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   // console.log('Cache is not dirty, skipping persistence'); // Reduce noise
+      // } catch (error) {
+      //   // Ignore console errors during shutdown
+      // }
       return;
     }
 
     try {
-      try {
-        console.log('Persisting cache to disk...');
-      } catch (error) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log('Persisting cache to disk...'); // Removed for test hygiene
+      // } catch (error) {
+      //   // Ignore console errors during shutdown
+      // }
 
       // Immediately mark as not dirty to prevent race conditions with timer
       this.isDirty = false;
@@ -759,11 +764,11 @@ export class PersistentCache extends Cache {
       // Perform the actual save
       await this.persistenceManager.saveAllEntries(this.namespaceCache);
 
-      try {
-        console.log('Cache persisted successfully');
-      } catch (error) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log('Cache persisted successfully'); // Removed for test hygiene
+      // } catch (error) {
+      //   // Ignore console errors during shutdown
+      // }
     } catch (error) {
       try {
         console.error('Error persisting cache to disk:', error);
@@ -799,11 +804,11 @@ export class PersistentCache extends Cache {
     try {
       // Use a synchronous file write
       // This is not ideal, but it's the only way to ensure the cache is persisted before exit
-      try {
-        console.log('Persisting cache synchronously before exit...');
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log('Persisting cache synchronously before exit...'); // Removed for test hygiene
+      // } catch (_) {
+      //   // Ignore console errors during shutdown
+      // }
 
       // We can't use the persistence manager directly because it's async
       // Instead, we'll use the imported Node.js fs module directly
@@ -868,11 +873,11 @@ export class PersistentCache extends Cache {
       };
       fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
 
-      try {
-        console.log('Cache persisted synchronously');
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log('Cache persisted synchronously'); // Removed for test hygiene
+      // } catch (_) {
+      //   // Ignore console errors during shutdown
+      // }
     } catch (error) {
       try {
         console.error('Error persisting cache synchronously:', error);
@@ -894,12 +899,12 @@ export class PersistentCache extends Cache {
    * @returns A promise that resolves when the cache is loaded
    */
   async loadFromDisk(): Promise<void> {
-    try {
-      try {
-        console.log('Loading cache from disk...');
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+    try { // Restore the outer try block for loadFromDisk
+      // try {
+      //   console.log('Loading cache from disk...'); // Removed for test hygiene
+      // } catch (_) {
+      //   // Ignore console errors during shutdown
+      // }
 
       // Clear in-memory cache first
       super.clear();
@@ -932,11 +937,11 @@ export class PersistentCache extends Cache {
         }
       }
 
-      try {
-        console.log(`Loaded ${this.getEntryCount()} entries from persistent storage`);
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      // try {
+      //   console.log(`Loaded ${this.getEntryCount()} entries from persistent storage`); // Removed for test hygiene
+      // } catch (_) {
+      //   // Ignore console errors during shutdown
+      // }
     } catch (error) {
       try {
         console.error('Error loading cache from disk:', error);
@@ -985,7 +990,9 @@ export class PersistentCache extends Cache {
    */
   async dispose(): Promise<void> {
     try {
-      console.log('Disposing PersistentCache...');
+      if (process.env.NODE_ENV !== 'test') {
+        console.log('Disposing PersistentCache...');
+      }
     } catch (_) {
       // Ignore console errors during shutdown
     }
@@ -998,7 +1005,9 @@ export class PersistentCache extends Cache {
       try {
         await this.persistToDisk();
         try {
-          console.log('Cache persisted successfully during disposal.');
+          if (process.env.NODE_ENV !== 'test') {
+            console.log('Cache persisted successfully during disposal.');
+          }
         } catch (_) {
           // Ignore console errors during shutdown
         }
@@ -1012,7 +1021,9 @@ export class PersistentCache extends Cache {
       }
     } else {
        try {
-          console.log('No dirty entries to persist during disposal.');
+          if (process.env.NODE_ENV !== 'test') {
+            console.log('No dirty entries to persist during disposal.');
+          }
         } catch (_) {
           // Ignore console errors during shutdown
         }
@@ -1032,7 +1043,9 @@ export class PersistentCache extends Cache {
     await super.dispose();
 
     try {
-      console.log('PersistentCache disposed.');
+      if (process.env.NODE_ENV !== 'test') {
+        console.log('PersistentCache disposed.');
+      }
     } catch (_) {
       // Ignore console errors during shutdown
     }
@@ -1047,14 +1060,14 @@ export class PersistentCache extends Cache {
   protected async evictLRUEntries(count: number): Promise<void> {
     // Ensure count is valid
     if (count <= 0) return;
-    console.log(`[Evict] Attempting to evict ${count} entries.`); // DEBUG LOG
+    // console.log(`[Evict] Attempting to evict ${count} entries.`); // DEBUG LOG - Removed for test hygiene
 
     // Get keys sorted by last access time (oldest first)
     const sortedKeys = [...this.accessLog.entries()]
       .sort(([, timeA], [, timeB]) => timeA - timeB)
       .map(([key]) => key)
       .slice(0, count); // Get the 'count' oldest keys
-    console.log('[Evict] Keys targeted for eviction:', sortedKeys); // DEBUG LOG
+    // console.log('[Evict] Keys targeted for eviction:', sortedKeys); // DEBUG LOG - Removed for test hygiene
 
     let actualEvictedCount = 0;
     const removePromises: Promise<void>[] = [];
@@ -1084,7 +1097,7 @@ export class PersistentCache extends Cache {
         }
     }
 
-    if (actualEvictedCount > 0) {
+    if (actualEvictedCount > 0) { // Restore this log as it's not a debug log
         console.log(`Evicted ${actualEvictedCount} LRU cache entries from memory`);
     }
 

@@ -200,6 +200,11 @@ export class EventPersistenceManager {
    * Starts periodic persistence of events
    */
   startPeriodicPersistence(): void {
+    // Do not start the timer in the test environment to prevent open handles
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+
     if (this.persistenceTimer) {
       clearInterval(this.persistenceTimer);
       this.persistenceTimer = undefined;
