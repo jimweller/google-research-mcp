@@ -54,4 +54,4 @@ src/**/*.js.map
 # Temporary files
 *.tmp
 *.temp
-digest.txt
+digest.txtsetup_roo_project.sh
