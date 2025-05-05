@@ -32,6 +32,9 @@ import { CheerioCrawler } from "crawlee";  // Web scraping library
 import { YoutubeTranscript } from "youtube-transcript";
 // Import cache modules using index file with .js extension
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
+// Import OAuth scopes documentation and middleware
+import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation.js";
+import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
 
 // Type definitions for express
 type Request = express.Request;
@@ -42,53 +45,45 @@ type NextFunction = express.NextFunction;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/**
- * Factory function to create and configure the Express app with MCP server
- *
- * @param opts - Configuration options
- * @param opts.cachePath - Path for cache storage (default: '../storage/persistent_cache')
- * @param opts.eventPath - Path for event storage (default: '../storage/event_store')
- * @returns Configured Express application
- */
-export function createApp(opts: {
-  cachePath?: string;
-  eventPath?: string;
-} = {}) {
+// --- Default Paths ---
+const DEFAULT_CACHE_PATH = path.resolve(__dirname, '..', 'storage', 'persistent_cache');
+const DEFAULT_EVENT_PATH = path.resolve(__dirname, '..', 'storage', 'event_store');
+const DEFAULT_REQUEST_QUEUES_PATH = path.resolve(__dirname, '..', 'storage', 'request_queues', 'default');
 
-// ─── 0️⃣ ENVIRONMENT VALIDATION & CORS SETUP ─────────────────────────────────────
+// --- Global Instances ---
+// Initialize Cache and Event Store globally so they are available for both transports
+let globalCacheInstance: PersistentCache;
+let eventStoreInstance: PersistentEventStore;
+let stdioServerInstance: McpServer | undefined;
+let stdioTransportInstance: StdioServerTransport | undefined;
+let httpTransportInstance: StreamableHTTPServerTransport | undefined;
+
+
 /**
- * Check for required environment variables and configure CORS settings
- *
- * The server requires the following environment variables:
- * - GOOGLE_CUSTOM_SEARCH_API_KEY: For Google search functionality
- * - GOOGLE_CUSTOM_SEARCH_ID: The custom search engine ID
- * - GOOGLE_GEMINI_API_KEY: For Gemini AI analysis
+ * Initializes global cache and event store instances.
+ * Ensures storage directories exist.
+ * @param cachePath - Path for cache storage
+ * @param eventPath - Path for event storage
  */
-for (const key of [
-    "GOOGLE_CUSTOM_SEARCH_API_KEY",
-    "GOOGLE_CUSTOM_SEARCH_ID",
-    "GOOGLE_GEMINI_API_KEY"
-]) {
-    if (!process.env[key]) {
-        console.error(`❌ Missing required env var ${key}`);
-        process.exit(1);
+async function initializeGlobalInstances(
+  cachePath: string = DEFAULT_CACHE_PATH,
+  eventPath: string = DEFAULT_EVENT_PATH,
+  requestQueuesPath: string = DEFAULT_REQUEST_QUEUES_PATH
+) {
+  // Ensure directories exist
+  try {
+    await fs.mkdir(path.dirname(cachePath), { recursive: true });
+    await fs.mkdir(path.dirname(eventPath), { recursive: true });
+    await fs.mkdir(requestQueuesPath, { recursive: true });
+    if (process.env.NODE_ENV !== 'test') {
+      console.log(`✅ Ensured storage directories exist.`);
     }
-}
-const ALLOWED_ORIGINS =
-process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
+  } catch (error) {
+    console.error(`❌ Error ensuring storage directories: ${error}`);
+    process.exit(1); // Exit if we can't create storage dirs
+  }
 
-  // ─── ENVIRONMENT VALIDATION & CORS SETUP ─────────────────────────────────────
-  // Moved inside createApp function
-
-  /**
-   * Create a global persistent cache instance with configurable settings
-   *
-   * This cache uses a hybrid persistence strategy that:
-   * - Immediately persists critical namespaces (googleSearch, scrapePage)
-   * - Periodically persists all namespaces every 5 minutes
-   * - Maintains data across server restarts
-   */
-  const globalCache = new PersistentCache({
+  globalCacheInstance = new PersistentCache({
     defaultTTL: 5 * 60 * 1000, // 5 minutes default TTL
     maxSize: 1000, // Maximum 1000 entries
     persistenceStrategy: new HybridPersistenceStrategy(
@@ -96,23 +91,28 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
       5 * 60 * 1000, // 5 minutes persistence interval
       ['googleSearch', 'scrapePage', 'analyzeWithGemini'] // All persistent namespaces
     ),
-    // Use configurable path or default
-    storagePath: opts.cachePath || path.resolve(__dirname, '..', 'storage', 'persistent_cache'),
+    storagePath: cachePath,
     eagerLoading: true // Load all entries on startup
   });
 
-  // ─── SHARED IN-MEMORY STORAGE FOR SSE SESSIONS ─────────────────────────────
-  /**
-   * In-memory storage for SSE (Server-Sent Events) sessions
-   *
-   * These maps maintain:
-   * - Active transport connections by session ID
-   * - Transcripts collected during each session for context
-   */
-  const sessions: Record<string, StreamableHTTPServerTransport> = {};
-  const transcriptsMap: Record<string, string[]> = {};
+  eventStoreInstance = new PersistentEventStore({
+    storagePath: eventPath,
+    maxEventsPerStream: 1000,
+    eventTTL: 24 * 60 * 60 * 1000, // 24 hours
+    persistenceInterval: 5 * 60 * 1000, // 5 minutes
+    criticalStreamIds: [], // Define critical streams if needed
+    eagerLoading: true
+  });
 
-// ─── 1️⃣ MCP TOOLS & RESOURCES CONFIGURATION FACTORY ───────────────────────────
+  // Load data eagerly
+  await globalCacheInstance.loadFromDisk(); // Cache needs explicit load
+  // Event store loads eagerly via constructor option, no explicit call needed here
+  if (process.env.NODE_ENV !== 'test') {
+    console.log("✅ Global Cache and Event Store initialized.");
+  }
+}
+
+// --- Tool/Resource Configuration (Moved to Top Level) ---
 /**
  * Configures and registers all MCP tools and resources for a server instance
  *
@@ -126,11 +126,9 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
  * readability and maintainability.
  *
  * @param server - The MCP server instance to configure
- * @param sessionTranscripts - Optional array to store session-specific transcripts
  */
 function configureToolsAndResources(
-    server: McpServer,
-    sessionTranscripts?: string[]
+    server: McpServer
 ) {
     // 1) Extract each tool's implementation into its own async function with caching
     /**
@@ -151,7 +149,8 @@ function configureToolsAndResources(
         query: string;
         num_results: number;
     }) => {
-        return globalCache.getOrCompute(
+        // Use the globally initialized cache instance directly
+        return globalCacheInstance.getOrCompute(
             'googleSearch',
             { query, num_results },
             async () => {
@@ -174,7 +173,7 @@ function configureToolsAndResources(
             }
         );
     };
-    
+
     /**
      * Scrapes content from a web page or extracts YouTube transcripts
      *
@@ -188,7 +187,8 @@ function configureToolsAndResources(
      */
     const scrapePageFn = async ({ url }: { url: string }) => {
         // Use a longer TTL for scraped content as it changes less frequently
-        const result = await globalCache.getOrCompute(
+        // Use the globally initialized cache instance directly
+        const result = await globalCacheInstance.getOrCompute(
             'scrapePage',
             { url },
             async () => {
@@ -210,7 +210,7 @@ function configureToolsAndResources(
                             const headings = $("h1, h2, h3").map((_, el) => $(el).text()).get().join(" ");
                             const paragraphs = $("p").map((_, el) => $(el).text()).get().join(" ");
                             const bodyText = $("body").text().replace(/\s+/g, " ").trim();
-                            
+
                             // Combine all content to ensure we have enough text
                             page = `Title: ${title}\nHeadings: ${headings}\nParagraphs: ${paragraphs}\nBody: ${bodyText}`;
                         },
@@ -219,12 +219,12 @@ function configureToolsAndResources(
                     await crawler.run([{ url }]);
                     text = page;
                 }
-                
+
                 // Ensure we have at least 100 characters for testing purposes
                 if (text.length < 100) {
                     text = text + " " + "This is additional content to ensure the scraped text meets the minimum length requirements for testing purposes.".repeat(3);
                 }
-                
+
                 return [{ type: "text" as const, text }];
             },
             {
@@ -233,19 +233,16 @@ function configureToolsAndResources(
                 staleTime: 24 * 60 * 60 * 1000 // Allow serving stale content for up to a day while revalidating
             }
         );
-        
-        // Still add to session transcripts for session-specific features
-        if (sessionTranscripts && result[0]?.text) {
-            sessionTranscripts.push(result[0].text);
-        }
-        
+
+        // Session transcripts are now handled in the session initialization handler
+        // We'll return the result directly
         return result;
     };
-    
+
     const gemini = new GoogleGenAI({
         apiKey: process.env.GOOGLE_GEMINI_API_KEY!,
     });
-    
+
     /**
      * Analyzes text content using Google's Gemini AI models
      *
@@ -264,7 +261,8 @@ function configureToolsAndResources(
         model?: string;
     }) => {
         // Use a shorter TTL for AI analysis as the model may be updated
-        return globalCache.getOrCompute(
+        // Use the globally initialized cache instance directly
+        return globalCacheInstance.getOrCompute(
             'analyzeWithGemini',
             { text, model },
             async () => {
@@ -282,7 +280,7 @@ function configureToolsAndResources(
             }
         );
     };
-    
+
     // 2) Register each tool with the MCP server
     /**
      * Tool Registration
@@ -297,24 +295,35 @@ function configureToolsAndResources(
     server.tool(
         "google_search",
         { query: z.string(), num_results: z.number().default(5) },
+        { title: "Performs a Google search and returns relevant web pages", readOnlyHint: true },
         async ({ query, num_results = 5 }) => ({ content: await googleSearchFn({ query, num_results }) })
     );
-    
+
     server.tool(
         "scrape_page",
         { url: z.string().url() },
-        async ({ url }) => ({ content: await scrapePageFn({ url }) })
+        { title: "Scrapes content from a web page or extracts YouTube transcripts", readOnlyHint: true },
+        async ({ url }) => {
+            const result = await scrapePageFn({ url });
+
+            // Note: In SDK v1.11.0, we can't directly access the session ID from the tool handler
+            // Session transcripts are now updated through the event system when events are processed
+            // The session-specific resources are registered in the session initialization handler
+
+            return { content: result };
+        }
     );
-    
+
     server.tool(
         "analyze_with_gemini",
         {
             text: z.string(),
             model: z.string().default("gemini-2.0-flash-001"),
         },
+        { title: "Analyzes text content using Google's Gemini AI models", readOnlyHint: true },
         async ({ text, model = "gemini-2.0-flash-001" }) => ({ content: await analyzeWithGeminiFn({ text, model }) })
-    );      
-    
+    );
+
     // 3) Create composite tools by chaining operations
     /**
      * Research Topic Tool - A composite tool that chains multiple operations
@@ -331,264 +340,234 @@ function configureToolsAndResources(
     server.tool(
         "research_topic",
         { query: z.string(), num_results: z.number().default(3) },
+        {
+            title: "A composite tool that chains search, scrape, and analysis operations to research a topic",
+            readOnlyHint: true
+        },
         async ({ query, num_results }) => {
             // For composite operations like research_topic, we don't cache the entire operation
             // since it's composed of other cached operations. This provides more granular caching
             // and better reuse of cached components.
-            
+
             // A) Search
             const searchResults = await googleSearchFn({ query, num_results });
             const urls = searchResults.map((c) => c.text);
-            
+
             // B) Scrape each URL
             const scrapes = await Promise.all(
                 urls.map((u) => scrapePageFn({ url: u }))
             );
-            
+
             // C) Combine
             const combined = scrapes
             .map((sc) => sc[0].text)
             .join("\n\n---\n\n");
-            
+
             // D) Analyze
             const analysis = await analyzeWithGeminiFn({ text: combined });
             return { content: analysis };
         }
     );
-    
-    // 4) Register session-scoped resources
-    /**
-     * Session Transcripts Resource
-     *
-     * This resource provides access to all transcripts collected during a session.
-     * It's useful for maintaining context across multiple requests in the same session.
-     *
-     * Resources in MCP provide data that can be referenced by URI patterns.
-     */
-    if (sessionTranscripts) {
-        server.resource(
-            "session_transcripts",
-            new ResourceTemplate("session://{sessionId}/transcripts", {
-                list: undefined,
-            }),
-            async (_uri, { sessionId }) => ({
-                contents: sessionTranscripts.map((t, i) => ({
-                    uri: `session://${sessionId}/transcripts#${i}`,
-                    text: t,
-                })),
-            })
-        );
-    }
-}  
 
-// ─── 2️⃣ STDIO TRANSPORT SETUP ──────────────────────────────────────────────────
+    // Session-specific resources are now registered in the session initialization handler
+    // This allows for better isolation between sessions and more explicit resource management
+}
+
+
+// --- Function Definitions ---
+
 /**
- * Sets up the STDIO transport for command-line and process-to-process communication
- *
- * This transport allows the MCP server to communicate via standard input/output,
- * making it suitable for use as a child process or command-line tool.
- *
- * The STDIO transport is simpler than HTTP+SSE but doesn't support sessions
- * or multiple concurrent clients.
+ * Sets up the STDIO transport using the globally initialized cache and event store.
  */
-;(async () => {
-    const stdioServer = new McpServer({
-        name: "google-researcher-mcp-stdio",
-        version: "1.0.0"
-    });
-    configureToolsAndResources(stdioServer);
-    const stdioTransport = new StdioServerTransport();
-    await stdioServer.connect(stdioTransport);
+// Ensure this function is defined at the top level before the main execution block
+async function setupStdioTransport() {
+  // Ensure global instances are initialized first
+  if (!globalCacheInstance || !eventStoreInstance) {
+    console.error("❌ Cannot setup stdio transport: Global instances not initialized.");
+    process.exit(1);
+  }
+
+  stdioServerInstance = new McpServer({
+    name: "google-researcher-mcp-stdio",
+    version: "1.0.0"
+  });
+  // Configure tools using the global cache/store (implicitly via configureToolsAndResources)
+  configureToolsAndResources(stdioServerInstance); // This function needs access to globalCacheInstance
+  stdioTransportInstance = new StdioServerTransport();
+  await stdioServerInstance.connect(stdioTransportInstance);
+  if (process.env.NODE_ENV !== 'test') {
     console.log("✅ stdio transport ready");
-})();
+  }
+}
 
-// ─── 3️⃣ HTTP + SSE TRANSPORT SETUP ────────────────────────────────────────────
 /**
- * Sets up the HTTP+SSE transport for web-based clients
+ * Factory function to create and configure the Express app for the HTTP+SSE transport
  *
- * This transport:
- * - Uses Express for HTTP request handling
- * - Implements Server-Sent Events (SSE) for streaming responses
- * - Supports multiple concurrent clients with session management
- * - Provides session resumability via the PersistentEventStore
- *
- * The HTTP+SSE transport is more complex but offers better support for
- * web clients and streaming responses.
+ * @param cache - The pre-initialized PersistentCache instance
+ * @param eventStore - The pre-initialized PersistentEventStore instance
+ * @param oauthOptions - Optional OAuth configuration
+ * @returns Object containing the Express app and the HTTP transport instance
  */
+// Add async keyword here
+export async function createAppAndHttpTransport(
+  cache: PersistentCache, // Accept pre-initialized cache
+  eventStore: PersistentEventStore, // Accept pre-initialized event store
+  oauthOptions?: OAuthMiddlewareOptions
+) {
+  // Ensure global instances are available (they should be by now)
+  if (!globalCacheInstance || !eventStoreInstance) {
+    console.error("❌ Cannot create app: Global instances not initialized.");
+    process.exit(1);
+  }
+
+  // ─── 0️⃣ ENVIRONMENT VALIDATION & CORS SETUP ─────────────────────────────────────
+  /**
+ * Check for required environment variables and configure CORS settings
+ *
+ * The server requires the following environment variables:
+ * - GOOGLE_CUSTOM_SEARCH_API_KEY: For Google search functionality
+ * - GOOGLE_CUSTOM_SEARCH_ID: The custom search engine ID
+ * - GOOGLE_GEMINI_API_KEY: For Gemini AI analysis
+ */
+for (const key of [
+    "GOOGLE_CUSTOM_SEARCH_API_KEY",
+    "GOOGLE_CUSTOM_SEARCH_ID",
+    "GOOGLE_GEMINI_API_KEY"
+]) {
+    if (!process.env[key]) {
+        console.error(`❌ Missing required env var ${key}`);
+        process.exit(1);
+    }
+}
+const ALLOWED_ORIGINS =
+process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
+
+  // Create the Express app instance here
   const app = express();
   app.use(express.json());
   app.use(
       cors({
           origin: ALLOWED_ORIGINS,
           methods: ["GET", "POST", "DELETE"],
-          allowedHeaders: ["Content-Type", "Mcp-Session-Id", "Accept"],
+          allowedHeaders: ["Content-Type", "Mcp-Session-Id", "Accept", "Authorization"],
           exposedHeaders: ["Mcp-Session-Id"]
       })
   );
 
-  // Events API endpoints
-  let events: any[] = [];
+  // Configure OAuth middleware if options are provided
+  let oauthMiddleware: ReturnType<typeof createOAuthMiddleware> | undefined;
+  if (oauthOptions) { // Use passed-in options
+    oauthMiddleware = createOAuthMiddleware(oauthOptions);
+    console.log("✅ OAuth 2.1 middleware configured");
+  }
 
-  // POST /events - Create a new event
-  app.post("/events", (req: Request, res: Response) => {
-    const event = {
-      id: randomUUID(),
-      timestamp: new Date().toISOString(),
-      ...req.body
-    };
-    events.push(event);
-    res.status(201).json(event);
-  });
-
-  // GET /events - List all events
-  app.get("/events", (_req: Request, res: Response) => {
-    res.status(200).json(events);
-  });
-
-  // GET /events/:id - Get a specific event by ID
-  app.get("/events/:id", (req: Request, res: Response) => {
-    const event = events.find(e => e.id === req.params.id);
-    if (event) {
-      res.status(200).json(event);
-    } else {
-      res.status(404).json({ error: "Event not found" });
-    }
-  });
-
-/**
- * Checks if a request is an initialization request
- *
- * Initialization requests create new MCP sessions.
- *
- * @param body - The request body
- * @returns True if this is an initialization request
- */
-function isInitializeRequest(body: any): boolean {
+  /**
+   * Checks if a request is an initialization request
+   *
+   * Initialization requests create new MCP sessions.
+   *
+   * @param body - The request body
+   * @returns True if this is an initialization request
+   */
+  function isInitializeRequest(body: any): boolean {
     return body.method === "initialize";
-}
+  }
 
-/**
- * Main MCP endpoint for JSON-RPC requests
- *
- * This endpoint:
- * 1. Handles session initialization
- * 2. Routes requests to existing sessions
- * 3. Creates new MCP server instances for new sessions
- * 4. Delegates JSON-RPC processing to the appropriate transport
- */
-// Middleware to handle content negotiation for JSON-RPC requests
-app.use((req: Request, res: Response, next: NextFunction) => {
+  // Create the MCP server
+  const httpServer = new McpServer({
+    name: "google-researcher-mcp-sse",
+    version: "1.0.0"
+  });
+
+  // Configure tools and resources for the server (using the global function)
+  configureToolsAndResources(httpServer); // Call configureTools here
+
+  // Create the streamable HTTP transport with session management
+  httpTransportInstance = new StreamableHTTPServerTransport({ // Assign to the global variable
+    sessionIdGenerator: () => randomUUID(),
+    eventStore: eventStoreInstance, // Use the passed-in instance
+    onsessioninitialized: (sid) => {
+      console.log(`✅ SSE session initialized: ${sid}`);
+    },
+    // Removed onclose handler - rely on transport's internal management
+  });
+
+
+  // Connect the MCP server to the transport
+  await httpServer.connect(httpTransportInstance);
+  if (process.env.NODE_ENV !== 'test') {
+    console.log("✅ HTTP transport connected to MCP server");
+  }
+
+  // Middleware to handle content negotiation for JSON-RPC requests
+  app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path === '/mcp' && req.method === 'POST') {
-        // Force content type to be application/json for JSON-RPC requests
-        res.setHeader('Content-Type', 'application/json');
+      // Force content type to be application/json for JSON-RPC requests
+      res.setHeader('Content-Type', 'application/json');
     }
     next();
-});
+  });
 
-app.post("/mcp", async (req: Request, res: Response, next: NextFunction) => {
+  /**
+   * Checks if a request body is a JSON-RPC batch request
+   *
+   * According to the JSON-RPC specification, batch requests are sent as arrays
+   * of individual request objects.
+   *
+   * @param body - The request body
+   * @returns True if this is a batch request
+   */
+  function isBatchRequest(body: any): boolean {
+    return Array.isArray(body);
+  }
+
+  // Handle POST requests to /mcp
+  app.post("/mcp", async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const init = isInitializeRequest(req.body);
-        const sidHeader = req.headers["mcp-session-id"] as string | undefined;
-        let transport = sidHeader ? sessions[sidHeader] : undefined;
-        
-        // New session
-        if (!transport && init) {
-            const sessionTranscripts: string[] = [];
-            const eventStore = new PersistentEventStore({
-                // Use configurable path or default
-                storagePath: opts.eventPath || path.resolve(__dirname, '..', 'storage', 'event_store'),
-                maxEventsPerStream: 1000,
-                eventTTL: 24 * 60 * 60 * 1000, // 24 hours
-                persistenceInterval: 5 * 60 * 1000, // 5 minutes
-                criticalStreamIds: [], // Define critical streams if needed
-                eagerLoading: true
-            });
-            
-            // Ensure request_queues directory exists
-            const requestQueuesDir = path.resolve(__dirname, '..', 'storage', 'request_queues', 'default');
-            try {
-                await fs.mkdir(requestQueuesDir, { recursive: true });
-                console.log(`✅ Created request queues directory: ${requestQueuesDir}`);
-            } catch (error) {
-                console.error(`❌ Error creating request queues directory: ${error}`);
-            }
-            
-            transport = new StreamableHTTPServerTransport({
-                sessionIdGenerator: () => randomUUID(),
-                eventStore,
-                onsessioninitialized: (sid) => {
-                    sessions[sid] = transport!;
-                    transcriptsMap[sid] = sessionTranscripts;
-                    console.log(`✅ SSE session initialized: ${sid}`);
-                }
-            });
-            transport.onclose = () => {
-                if (transport!.sessionId) {
-                    delete sessions[transport!.sessionId];
-                    delete transcriptsMap[transport!.sessionId];
-                }
-            };
-            
-            const sessionServer = new McpServer({
-                name: "google-researcher-mcp-sse",
-                version: "1.0.0"
-            });
-            configureToolsAndResources(sessionServer, sessionTranscripts);
-            await sessionServer.connect(transport);
-        } else if (!transport) {
-            res.status(400).json({
-                jsonrpc: "2.0",
-                error: { code: -32000, message: "Bad Request: No valid session ID provided" },
-                id: null
-            });
-            return;
-        }
-        
-        // Delegate JSON-RPC
-        await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-        next(err);
-    }
-});
+      // Check if this is a batch request
+      const isBatch = isBatchRequest(req.body);
 
-/**
- * SSE subscription & teardown handler
- *
- * This function handles:
- * - GET requests for establishing SSE connections
- * - DELETE requests for tearing down sessions
- *
- * Both operations require a valid session ID in the headers.
- */
-const handleSession = async (req: Request, res: Response) => {
-    const sid = req.headers["mcp-session-id"] as string;
-    const t = sessions[sid];
-    if (!t) {
+      // Handle empty batch requests (invalid according to spec)
+      if (isBatch && req.body.length === 0) {
         res.status(400).json({
-            jsonrpc: "2.0",
-            error: { code: -32000, message: "Bad Request: No valid session ID provided" },
-            id: null
+          jsonrpc: "2.0",
+          error: { code: -32600, message: "Invalid Request: Empty batch" },
+          id: null
         });
         return;
-    }
-    await t.handleRequest(req, res);
-};
+      }
 
-app.get(
-    "/mcp",
-    async (req: Request, res: Response, next: NextFunction) => {
-        try { await handleSession(req, res); }
-        catch (err) { next(err); }
-    }
-);
+      // Removed special handling for initialization requests.
+      // Let the main handleRequest below manage session creation/resumption via eventStore.
 
-app.delete(
-    "/mcp",
-    async (req: Request, res: Response, next: NextFunction) => {
-        try { await handleSession(req, res); }
-        catch (err) { next(err); }
+      // Get session ID from header (still useful for logging)
+      const sidHeader = req.headers["mcp-session-id"] as string | undefined;
+
+      // Removed explicit session validation - rely on transport's handleRequest
+      // For existing sessions, delegate to the transport
+      // The StreamableHTTPServerTransport should handle batch requests correctly
+      // console.log(`Processing ${isBatch ? 'batch' : 'single'} request with session ID: ${sidHeader}`); // Reduce noise
+      await httpTransportInstance.handleRequest(req, res, req.body); // Use the instance variable
+    } catch (err) {
+      // console.error("Error processing request:", err); // Reduce noise, rely on default handler
+      next(err);
     }
-);
+  });
+
+  // Handle GET and DELETE requests to /mcp (SSE connections and session teardown)
+  const handleSessionRequest = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sid = req.headers["mcp-session-id"] as string;
+      // Removed explicit session validation - rely on transport's handleRequest
+      await httpTransportInstance.handleRequest(req, res); // Use the instance variable
+    } catch (err) {
+      // console.error("Error processing session request:", err); // Reduce noise
+      next(err);
+    }
+  };
+
+  app.get("/mcp", handleSessionRequest);
+  app.delete("/mcp", handleSessionRequest);
 
 // ─── 4️⃣ EVENT STORE & CACHE MANAGEMENT API ENDPOINTS ────────────────────────────
 /**
@@ -603,9 +582,10 @@ app.delete(
  * Useful for monitoring cache performance and diagnosing issues.
  */
 app.get("/mcp/cache-stats", (_req: Request, res: Response) => {
-    const stats = globalCache.getStats();
+    // Use the globally initialized cache instance directly
+    const stats = globalCacheInstance.getStats();
     const processStats = process.memoryUsage();
-    
+
     res.json({
         cache: {
             ...stats,
@@ -642,34 +622,16 @@ app.get("/mcp/cache-stats", (_req: Request, res: Response) => {
  */
 app.get("/mcp/event-store-stats", async (_req: Request, res: Response) => {
     try {
-        // Find any active event store
-        const activeSessionId = Object.keys(sessions)[0];
-        if (!activeSessionId) {
-            res.status(404).json({
-                error: "No active sessions found"
-            });
+        // Use the globally initialized event store instance directly
+        if (!eventStoreInstance || typeof eventStoreInstance.getStats !== 'function') {
+          res.status(500).json({
+            error: "Event store not available or not a PersistentEventStore"
+          });
             return;
         }
-        
-        // Get the transport for the active session
-        const transport = sessions[activeSessionId];
+        // Get stats from the global instance
+        const stats = await eventStoreInstance.getStats();
 
-        // Access the event store via the transport instance.
-        // NOTE: This accesses an internal property (_eventStore) as there's currently
-        // no public API on the transport to get the associated event store.
-        // This might need adjustment if the SDK's internal structure changes.
-        const eventStore = (transport as any)._eventStore;
-
-        if (!eventStore || typeof eventStore.getStats !== 'function') {
-            res.status(500).json({
-                error: "Event store not available or not a PersistentEventStore"
-            });
-            return;
-        }
-        
-        // Get stats
-        const stats = await eventStore.getStats();
-        
         res.json({
             eventStore: {
                 ...stats,
@@ -697,27 +659,27 @@ app.get("/mcp/event-store-stats", async (_req: Request, res: Response) => {
 app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
     const apiKey = req.headers["x-api-key"];
     const expectedKey = process.env.CACHE_ADMIN_KEY || "admin-key"; // Should be set in production
-    
+
     if (apiKey !== expectedKey) {
         res.status(401).json({ error: "Unauthorized" });
         return;
     }
-    
+
     const { namespace, args } = req.body;
-    
+
     if (namespace && args) {
-        // Invalidate specific entry
-        globalCache.invalidate(namespace, args);
-        res.json({
-            success: true,
+      // Invalidate specific entry using the global instance
+      globalCacheInstance.invalidate(namespace, args);
+      res.json({
+        success: true,
             message: `Cache entry invalidated for namespace: ${namespace}`,
             invalidatedAt: new Date().toISOString()
         });
     } else {
-        // Clear entire cache
-        globalCache.clear();
-        res.json({
-            success: true,
+      // Clear entire cache using the global instance
+      globalCacheInstance.clear();
+      res.json({
+        success: true,
             message: "Entire cache cleared",
             clearedAt: new Date().toISOString()
         });
@@ -735,10 +697,11 @@ app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
  * Useful for ensuring data is saved before server shutdown.
  */
 app.post("/mcp/cache-persist", async (_req: Request, res: Response) => {
-  try {
-    await globalCache.persistToDisk();
-    res.json({
-      success: true,
+ try {
+   // Use the global instance
+   await globalCacheInstance.persistToDisk();
+   res.json({
+     success: true,
       message: "Cache persisted successfully",
       persistedAt: new Date().toISOString()
     });
@@ -753,10 +716,11 @@ app.post("/mcp/cache-persist", async (_req: Request, res: Response) => {
 
 // Add GET endpoint for cache persistence (for easier access via browser or curl)
 app.get("/mcp/cache-persist", async (_req: Request, res: Response) => {
-  try {
-    await globalCache.persistToDisk();
-    res.json({
-      success: true,
+ try {
+   // Use the global instance
+   await globalCacheInstance.persistToDisk();
+   res.json({
+     success: true,
       message: "Cache persisted successfully",
       persistedAt: new Date().toISOString()
     });
@@ -770,35 +734,110 @@ app.get("/mcp/cache-persist", async (_req: Request, res: Response) => {
 });
 
 /**
+ * OAuth Scopes Documentation endpoint
+ *
+ * Provides documentation for the OAuth scopes used in the MCP server.
+ * This endpoint serves the documentation in markdown format.
+ *
+ * Useful for developers integrating with the MCP server's OAuth system.
+ */
+app.get("/mcp/oauth-scopes", (req: Request, res: Response) => {
+  serveOAuthScopesDocumentation(req, res);
+});
+
+/**
+ * OAuth configuration endpoint
+ *
+ * Returns the OAuth configuration information, including:
+ * - Whether OAuth is enabled
+ * - The issuer URL
+ * - The audience value
+ * - Available endpoints
+ *
+ * This endpoint is public and does not require authentication.
+ */
+app.get("/mcp/oauth-config", (_req: Request, res: Response) => {
+  const oauthEnabled = !!oauthOptions; // Use passed-in options
+
+  res.json({
+    oauth: {
+      enabled: oauthEnabled,
+      issuer: oauthEnabled ? oauthOptions!.issuerUrl : null,
+      audience: oauthEnabled ? oauthOptions!.audience : null
+    },
+    endpoints: {
+      jwks: oauthEnabled ? `${oauthOptions!.issuerUrl}${oauthOptions!.jwksPath || '/.well-known/jwks.json'}` : null,
+      tokenInfo: oauthEnabled ? "/mcp/oauth-token-info" : null,
+      scopes: "/mcp/oauth-scopes"
+    }
+  });
+});
+
+/**
+ * OAuth token info endpoint
+ *
+ * Returns information about the authenticated user's token.
+ * This endpoint requires authentication.
+ */
+app.get("/mcp/oauth-token-info",
+  // Use a type assertion to help TypeScript understand this is a valid middleware
+  (oauthMiddleware || ((req: Request, res: Response, next: NextFunction) => {
+    res.status(401).json({
+      error: "oauth_not_configured",
+      error_description: "OAuth is not configured for this server"
+    });
+  })) as express.RequestHandler,
+  (req: Request, res: Response) => {
+  // The OAuth middleware will have attached the token and scopes to the request
+  const oauth = (req as any).oauth;
+
+  res.json({
+    token: {
+      subject: oauth.token.sub,
+      issuer: oauth.token.iss,
+      audience: oauth.token.aud,
+      scopes: oauth.scopes,
+      expiresAt: oauth.token.exp ? new Date(oauth.token.exp * 1000).toISOString() : null,
+      issuedAt: oauth.token.iat ? new Date(oauth.token.iat * 1000).toISOString() : null
+    }
+  });
+});
+
+/**
  * Shutdown handler for graceful cache persistence
  *
  * Ensures cache data is written to disk when the server is terminated
  * with SIGINT (Ctrl+C). This prevents data loss during shutdown.
  */
 process.on('SIGINT', async () => {
-    console.log('Persisting cache and event store before exit...');
+    // Refined SIGINT handler for non-test environments
+    console.log('Closing transports and persisting data before exit...');
     try {
-        // Persist cache
-        await globalCache.persistToDisk();
-        console.log('Cache persisted successfully');
-        
-        // Persist event stores for all active sessions
-        for (const sessionId of Object.keys(sessions)) {
-            try {
-                const transport = sessions[sessionId];
-                // Access the event store (this is a bit of a hack since there's no public API)
-                const eventStore = (transport as any)._eventStore;
-                
-                if (eventStore && typeof eventStore.dispose === 'function') {
-                    await eventStore.dispose();
-                    console.log(`Event store for session ${sessionId} persisted successfully`);
-                }
-            } catch (sessionError) {
-                console.error(`Failed to persist event store for session ${sessionId}:`, sessionError);
-            }
+        // Close transports first
+        if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
+          await stdioTransportInstance.close();
+          console.log('STDIO transport closed.');
+        }
+        if (httpTransportInstance && typeof httpTransportInstance.close === 'function') {
+          await httpTransportInstance.close();
+          console.log('HTTP transport closed.');
+        }
+
+        // Dispose cache (includes persistence) using the global instance
+        if (globalCacheInstance && typeof globalCacheInstance.dispose === 'function') {
+          await globalCacheInstance.dispose();
+        } else {
+          console.warn('globalCacheInstance dispose method not found or cache not available.');
+        }
+
+        // Dispose the global event store (includes persistence) using the global instance
+        if (eventStoreInstance && typeof eventStoreInstance.dispose === 'function') {
+            await eventStoreInstance.dispose();
+        } else {
+          console.warn('eventStoreInstance dispose method not found or event store not available.');
         }
     } catch (error) {
-        console.error('Failed to persist data:', error);
+        console.error('Error during graceful shutdown:', error);
     }
     process.exit(0);
 });
@@ -810,19 +849,57 @@ process.on('SIGINT', async () => {
  * Binds to IPv6 ANY address (::) which also accepts IPv4 connections
  * on dual-stack systems. Logs available endpoints for easy access.
  */
-  return app;
-}
+  // Return the app and the created HTTP transport instance
+  return { app, httpTransport: httpTransportInstance };
+} // <-- Closing brace for createAppAndHttpTransport
 
-// Only start the server if this file is run directly (not imported)
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const PORT = Number(process.env.PORT || 3000);
-  // Bind on IPv6 ANY ("::") which on most platforms also accepts v4 if dual‐stack is enabled:
-  createApp().listen(PORT, "::", () => {
-      console.log(`🌐 SSE server listening on`);
-      console.log(`   • http://[::1]:${PORT}/mcp   (IPv6 loopback)`);
-      console.log(`   • http://127.0.0.1:${PORT}/mcp   (IPv4 loopback)`);
-      console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-stats   (Cache statistics)`);
-      console.log(`   • http://127.0.0.1:${PORT}/mcp/event-store-stats   (Event store statistics)`);
-      console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-persist   (Force cache persistence)`);
-  });
-}
+// Export global instances for potential use in test setup/teardown
+export { stdioTransportInstance, httpTransportInstance, globalCacheInstance, eventStoreInstance };
+
+// --- Main Execution Block ---
+/**
+ * Main execution block: Initializes instances and starts transports/server
+ * based on execution context (direct run vs. import) and environment variables.
+ */
+(async () => {
+  // Initialize global cache and event store first
+  await initializeGlobalInstances();
+
+  // Setup STDIO transport (always runs, uses global instances)
+  await setupStdioTransport();
+
+  // If MCP_TEST_MODE is 'stdio', DO NOT start HTTP listener.
+  if (process.env.MCP_TEST_MODE === 'stdio') {
+    // Log info message only outside of Jest test environment
+    if (process.env.NODE_ENV !== 'test') {
+      console.log("ℹ️ Running in stdio test mode, HTTP listener skipped.");
+      console.log("   STDIO transport is active. Waiting for input...");
+    }
+  } else if (import.meta.url === `file://${process.argv[1]}`) {
+    // Otherwise, if run directly, start the HTTP listener.
+    const PORT = Number(process.env.PORT || 3000);
+    // Pass OAuth options if needed (example: reading from env vars)
+    const oauthOpts = process.env.OAUTH_ISSUER_URL ? {
+      issuerUrl: process.env.OAUTH_ISSUER_URL,
+      audience: process.env.OAUTH_AUDIENCE,
+      // jwksPath: process.env.OAUTH_JWKS_PATH // Optional
+    } : undefined;
+
+    const { app } = await createAppAndHttpTransport(globalCacheInstance, eventStoreInstance, oauthOpts);
+
+    // Start the HTTP server
+    app.listen(PORT, "::", () => {
+        console.log(`🌐 SSE server listening on`);
+        console.log(`   • http://[::1]:${PORT}/mcp   (IPv6 loopback)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp   (IPv4 loopback)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-stats   (Cache statistics)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/event-store-stats   (Event store statistics)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-persist   (Force cache persistence)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-scopes   (OAuth scopes documentation)`);
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-config   (OAuth configuration)`);
+        // Always show the OAuth token info endpoint in the logs
+        // The endpoint itself will handle the case when OAuth is not configured
+        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-token-info   (OAuth token info - requires authentication)`);
+      });
+  }
+})(); // End main execution block

@@ -4,14 +4,14 @@
   "description": "Model Context Protocol server for research and web access",
   "type": "module",
   "scripts": {
-    "test:e2e": "npm run test:e2e:stdio && npm run test:e2e:sse",
+    "test:e2e": "npm run build && npm run test:e2e:stdio && echo 'Attempting to kill process on port 3000...' && (PID_TO_KILL=$(lsof -ti tcp:3000) && kill $PID_TO_KILL || echo 'No process found on port 3000.') && sleep 2 && echo 'Starting server for SSE test...' && npm run start & SERVER_PID=$! && echo \"Server PID: $SERVER_PID\" && sleep 10 && echo 'Running SSE test...' && npm run test:e2e:sse ; TEST_EXIT_CODE=$? ; echo 'Killing SSE test server (PID: $SERVER_PID)...' && kill $SERVER_PID && exit $TEST_EXIT_CODE",
     "test:e2e:stdio": "node e2e_stdio_mcp_client_test.mjs",
     "test:e2e:sse": "node e2e_sse_mcp_client_test.mjs",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:verbose": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose",
     "test:fix": "node --experimental-vm-modules node_modules/jest/bin/jest.js --no-cache",
-    "build": "tsc",
+    "build": "tsc && node copy-js-files.js",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
   },
@@ -21,6 +21,8 @@
     "cors": "^2.8.5",
     "crawlee": "^3.13.2",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
     "punycode": "^2.3.1",
     "youtube-transcript": "^1.2.1",
     "zod": "^3.24.3"
@@ -29,8 +31,11 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.14.1",
+    "@types/supertest": "^6.0.3",
     "jest": "^29.7.0",
+    "supertest": "^7.1.0",
     "ts-jest": "^29.3.2",
     "ts-node-dev": "^2.0.0"
   }
