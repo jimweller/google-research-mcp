@@ -47,6 +47,7 @@ src/**/*.js.map
 # Roo configuration
 .roo/
 .roomodes
+setup_roo_project.sh
 
 # Runtime storage (cache, event store, etc.)
 /storage/
@@ -54,4 +55,4 @@ src/**/*.js.map
 # Temporary files
 *.tmp
 *.temp
-digest.txtsetup_roo_project.sh
+digest.txt
