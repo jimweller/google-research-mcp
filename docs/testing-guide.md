@@ -23,7 +23,7 @@ The project uses Jest as its testing framework with TypeScript support through t
 - **Setup Files**: `['<rootDir>/jest.setup.js']` for additional configuration
 
 Additional setup files:
-- `jest.setup.js`: Configures Jest's fake timers (see [Time Mocking](#time-mocking)) and suppresses console output during default test runs (see [Running Tests](#running-tests)).
+- `jest.setup.js`: Configures Jest's fake timers (see [Time Mocking](#time-mocking)) and suppresses console output during default test runs (see [Running Tests](#running-tests)). Note that core components like the cache and event store also disable internal timers (e.g., for periodic persistence) when `process.env.NODE_ENV === 'test'` to prevent open handles during test execution.
 
 ### Test Directory Structure
 
@@ -255,6 +255,20 @@ const mockAuthorizer = async (streamId: string, userId?: string) => {
   return streamId === 'stream1' && userId === 'user1';
 };
 ```
+
+### OAuth 2.1 Middleware Testing
+
+Testing the OAuth middleware (`src/shared/oauthMiddleware.ts`) involves:
+- **Mocking the Authorization Server (AS):** Using tools like `nock` or Jest mocks to simulate the external AS's JWKS endpoint (`/.well-known/jwks.json`).
+- **Generating Test JWTs:** Creating JWTs with various claims (valid, expired, wrong issuer/audience, different scopes) signed with keys corresponding to the mocked JWKS. Libraries like `jose` or `jsonwebtoken` can be used.
+- **Unit Testing Middleware Logic:** Verifying token extraction, signature validation, claim checks (issuer, audience, expiry), and scope enforcement. Testing correct `401`/`403` responses for various error conditions.
+- **Testing JWKS Handling:** Validating JWKS fetching, caching, and key rotation scenarios.
+
+Refer to the [Security Improvements Guide](../plans/security-improvements-implementation-guide.md#3-token-validation-middleware) for a detailed testing strategy.
+
+**Files:**
+- `src/shared/oauthMiddleware.spec.ts`: Tests for the OAuth middleware components.
+- `src/shared/oauthScopes.spec.ts`: Tests for scope definition and validation logic.
 
 ## Writing New Tests
 
