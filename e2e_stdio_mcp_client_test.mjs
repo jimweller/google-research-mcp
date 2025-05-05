@@ -9,7 +9,8 @@ const stdioTest = new MCPEndToEndTest("stdio", "mcp-stdio-test");
 const transport = new StdioClientTransport({
   command: "node",
   args: ["--no-warnings", "dist/server.js"],
-  env: process.env  // Pass environment variables to the child process
+  // Pass environment variables, adding MCP_TEST_MODE for stdio test
+  env: { ...process.env, MCP_TEST_MODE: 'stdio' }
 });
 
 try {

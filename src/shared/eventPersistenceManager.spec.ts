@@ -2,6 +2,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import { EventPersistenceManager } from './eventPersistenceManager.js';
 import { EventData } from './types/eventStore.js';
 import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import * as crypto from 'node:crypto'; // Import crypto for randomUUID
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -10,8 +11,9 @@ describe('EventPersistenceManager', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    // Create a temporary directory for testing
-    tempDir = path.join(process.cwd(), 'storage', 'test', `event_store_test_${Date.now()}`);
+    // Create a unique temporary directory for testing using randomUUID
+    const uniqueId = crypto.randomUUID(); // Use crypto for better uniqueness
+    tempDir = path.join(process.cwd(), 'storage', 'test', `event_store_test_${uniqueId}`);
     await fs.mkdir(tempDir, { recursive: true });
     
     // Create a new persistence manager instance

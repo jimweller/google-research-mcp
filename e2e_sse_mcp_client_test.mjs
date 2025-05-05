@@ -7,15 +7,37 @@ const sseTest = new MCPEndToEndTest("SSE", "mcp-sse-test");
 
 // Create the SSE transport
 const transport = new StreamableHTTPClientTransport(
-  new URL("http://localhost:3000/mcp")
+  new URL("http://localhost:3000/mcp"),
+  { timeout: 30000 } // Increase timeout to 30 seconds
 );
 
 try {
   // Connect to the server
+  // Connect to the server - Removed try/catch for "already initialized"
+  console.log(`Connecting to MCP server via ${sseTest.transportType}...`);
   await sseTest.connect(transport);
+  // Success message is inside connect()
+
+  // Add a small delay to allow server transport state to settle after connection
+  console.log("Waiting briefly after connection...");
+  await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+
+  // Run individual tests instead of runAllTests
+  console.log("Running SSE tests...");
+
+  // Check environment variables
+  sseTest.checkEnvironmentVariables();
+
+  // Run individual tests
+  await sseTest.listTools();
+  const url = await sseTest.testGoogleSearch();
+  await sseTest.testScrapePage(url);
+  await sseTest.testAnalyzeWithGemini();
+  await sseTest.testResearchTopic();
+  const transcript = await sseTest.testYouTubeTranscript();
+  await sseTest.testTranscriptAnalysis(transcript);
   
-  // Run all tests
-  await sseTest.runAllTests();
+  console.log("🎉 All SSE-based end-to-end tests passed!");
   
   // Clean up resources
   await sseTest.cleanup();

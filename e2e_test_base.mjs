@@ -177,14 +177,46 @@ export class MCPEndToEndTest {
    * Clean up resources before exiting
    */
   async cleanup() {
+    let closedGracefully = false;
     if (this.transport && typeof this.transport.close === 'function') {
-      await this.transport.close();
-      console.log("✅ Transport closed properly");
+      try {
+        await this.transport.close();
+        console.log("✅ Transport closed gracefully.");
+        closedGracefully = true;
+      } catch (closeError) {
+        console.warn("⚠️ Error during transport.close():", closeError.message);
+      }
     } else {
-      console.log("⚠️ No close method found on transport");
+      console.log("⚠️ No close method found on transport or transport not set.");
     }
 
-    // Allow any remaining operations to complete before exiting
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Force kill stdio child process if it exists and wasn't closed gracefully
+    // Check specifically for stdio transport and the existence of the child process property
+    if (this.transportType === 'stdio' && this.transport && this.transport.childProcess) {
+      if (!this.transport.childProcess.killed) {
+        try {
+          console.log(`Attempting to forcefully kill stdio child process (PID: ${this.transport.childProcess.pid})...`);
+          // Use SIGKILL for forceful termination
+          const killed = process.kill(this.transport.childProcess.pid, 'SIGKILL');
+          if (killed) {
+            console.log("✅ Stdio child process killed successfully.");
+          } else {
+             console.warn("⚠️ Failed to kill stdio child process (process.kill returned false).");
+          }
+        } catch (killError) {
+          // Ignore error if process already exited
+          if (killError.code !== 'ESRCH') {
+            console.error("❌ Error killing stdio child process:", killError);
+          } else {
+            console.log("ℹ️ Stdio child process likely already exited.");
+          }
+        }
+      } else {
+         console.log("ℹ️ Stdio child process was already killed (likely by transport.close).");
+      }
+    }
+
+    // Allow any remaining operations or process termination to complete
+    await new Promise(resolve => setTimeout(resolve, 200)); // Slightly longer delay
   }
 }
