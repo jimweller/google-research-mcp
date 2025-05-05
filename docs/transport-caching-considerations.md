@@ -9,7 +9,7 @@ The Google Researcher MCP Server supports multiple transport mechanisms:
 1. **STDIO Transport**: Communication via standard input/output streams
 2. **HTTP+SSE Transport**: Web-based communication with Server-Sent Events
 
-Each transport has different characteristics that can affect caching behavior if not properly configured.
+Each transport has different characteristics that can affect caching behavior if not properly configured. Furthermore, the HTTP+SSE transport now mandates OAuth 2.1 security, while the STDIO transport relies on the security of the local execution environment. While this document focuses on ensuring the *caching mechanism* is consistent, developers should be aware of these differing security contexts when choosing or implementing clients.
 
 ## Potential Issues
 
