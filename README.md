@@ -124,8 +124,31 @@ npm run dev
 
 - `GET /mcp/cache-stats`: View cache statistics
 - `GET /mcp/event-store-stats`: View event store statistics
-- `POST /mcp/cache-invalidate`: Clear cache entries (requires API key)
-- `POST /mcp/cache-persist`: Force cache persistence
+- `POST /mcp/cache-invalidate`: Clear cache entries (requires `mcp:admin:cache:invalidate` scope)
+- `POST /mcp/cache-persist`: Force cache persistence (requires `mcp:admin:cache:persist` scope)
+- `GET /mcp/oauth-scopes`: View OAuth scopes documentation (public)
+- `GET /mcp/oauth-config`: View server OAuth configuration (public)
+- `GET /mcp/oauth-token-info`: View details of the provided token (requires authentication)
+
+### Security & OAuth Scopes
+
+The server implements OAuth 2.1 authorization for secure access to its HTTP endpoints. OAuth scopes provide granular permission control:
+
+#### Tool Execution Scopes
+- `mcp:tool:google_search:execute`: Permission to execute the Google Search tool
+- `mcp:tool:scrape_page:execute`: Permission to scrape web pages
+- `mcp:tool:analyze_with_gemini:execute`: Permission to use Gemini AI for analysis
+- `mcp:tool:research_topic:execute`: Permission to use the composite research tool
+
+#### Administrative Scopes
+- `mcp:admin:cache:read`: Permission to view cache statistics
+- `mcp:admin:cache:invalidate`: Permission to clear cache entries
+- `mcp:admin:cache:persist`: Permission to force cache persistence
+- `mcp:admin:event-store:read`: Permission to view event store statistics
+- `mcp:admin:config:read`: Permission to view server configuration
+- `mcp:admin:logs:read`: Permission to access server logs
+
+For detailed documentation on OAuth scopes, visit the `/mcp/oauth-scopes` endpoint when the server is running.
 
 ## Architecture
 
@@ -169,8 +192,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // Create client
+// NOTE: The client MUST obtain a valid OAuth 2.1 Bearer token from the
+// configured external Authorization Server before making requests.
 const transport = new StreamableHTTPClientTransport(
-  new URL("http://localhost:3000/mcp")
+  new URL("http://localhost:3000/mcp"),
+  {
+    // The client needs to dynamically provide the token here
+    getAuthorization: async () => `Bearer YOUR_ACCESS_TOKEN`
+  }
 );
 const client = new Client({ name: "test-client" });
 await client.connect(transport);
@@ -185,7 +214,9 @@ console.log(result.content[0].text);
 
 ### Using with Roo Code
 
-[Roo Code](https://docs.roocode.com/) (VS Code extension) can use this server directly:
+**Note:** The following example uses STDIO transport. Integrating Roo Code with the HTTP transport requires handling the OAuth 2.1 flow, which may need specific configuration within Roo Code or a proxy setup. This example needs review based on the mandatory OAuth for HTTP.
+
+[Roo Code](https://docs.roocode.com/) (VS Code extension) can use this server via STDIO:
 
 1. Enable MCP Servers in Roo Code settings
 2. Create `.roo/mcp.json` in your project:
