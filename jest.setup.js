@@ -1,12 +1,6 @@
 // jest.setup.js
-import { jest, afterAll, afterEach, beforeEach } from '@jest/globals';
-// Import instances for cleanup
-import {
-  stdioTransportInstance,
-  httpTransportInstance,
-  globalCacheInstance,
-  eventStoreInstance
-} from './src/server.js'; // Assuming server.js is the compiled output
+import { jest, afterAll, afterEach, beforeEach, beforeAll } from '@jest/globals';
+import { cleanupStaleLocks, cleanupAllTestStorage, cleanupOpenHandles } from './src/shared/testCleanup.js';
 
 // Store original console methods
 const originalConsoleLog = console.log;
@@ -14,6 +8,13 @@ const originalConsoleError = console.error;
 
 // Check if Jest is running in verbose mode
 const isVerbose = process.argv.includes('--verbose') || process.argv.includes('-v');
+
+// Global cleanup before all tests
+beforeAll(async () => {
+  // Clean up any stale locks from previous test runs
+  await cleanupStaleLocks();
+  await cleanupAllTestStorage();
+});
 
 // Mock console methods before each test suite
 beforeEach(() => {
@@ -31,70 +32,33 @@ beforeEach(() => {
 // Make all tests use fake timers
 jest.useFakeTimers();
 
-// After every test, clear timers
-afterEach(() => {
+// After every test, clear timers and cleanup any test resources
+afterEach(async () => {
   jest.clearAllTimers();
+  
+  // Clean up any locks that may have been created during the test
+  await cleanupStaleLocks();
 });
 
-// After every test suite, clear timers, restore console, and clean up server resources
+// After every test suite, clean up all resources
 afterAll(async () => {
   // Restore original console methods first
   console.log = originalConsoleLog;
   console.error = originalConsoleError;
 
-  // --- Resource Cleanup ---
-  // Use try-catch for each cleanup step to ensure all attempts are made
-  
-  // 1. Close Transports
+  // Minimal cleanup to avoid hangs
   try {
-    if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
-      await stdioTransportInstance.close();
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('Jest afterAll: STDIO transport closed.');
-      }
-    }
+    // Basic cleanup without the problematic enhanced cleanup
+    await cleanupStaleLocks();
+    await cleanupAllTestStorage();
+    
+    // --- Timer Cleanup ---
+    // Clear any remaining fake timers
+    jest.clearAllTimers();
+    // Ensure we switch back to real timers for any subsequent operations
+    jest.useRealTimers();
+    
   } catch (error) {
-    console.error('Jest afterAll: Error closing STDIO transport:', error);
+    console.warn('Jest afterAll: Cleanup error:', error.message);
   }
-  
-  try {
-    if (httpTransportInstance && typeof httpTransportInstance.close === 'function') {
-      await httpTransportInstance.close();
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('Jest afterAll: HTTP transport closed.');
-      }
-    }
-  } catch (error) {
-    console.error('Jest afterAll: Error closing HTTP transport:', error);
-  }
-
-  // 2. Dispose Cache
-  try {
-    if (globalCacheInstance && typeof globalCacheInstance.dispose === 'function') {
-      await globalCacheInstance.dispose();
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('Jest afterAll: Global cache disposed.');
-      }
-    }
-  } catch (error) {
-    console.error('Jest afterAll: Error disposing global cache:', error);
-  }
-
-  // 3. Dispose Event Store
-  try {
-    if (eventStoreInstance && typeof eventStoreInstance.dispose === 'function') {
-      await eventStoreInstance.dispose();
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('Jest afterAll: Event store disposed.');
-      }
-    }
-  } catch (error) {
-    console.error('Jest afterAll: Error disposing event store:', error);
-  }
-  
-  // --- Timer Cleanup ---
-  // Clear any remaining fake timers
-  jest.clearAllTimers();
-  // Ensure we switch back to real timers for any subsequent operations
-  jest.useRealTimers();
-});
+}, 10000); // 10 second timeout for afterAll hook

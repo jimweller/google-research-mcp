@@ -1090,7 +1090,13 @@ process.on('SIGINT', async () => {
 } // <-- Closing brace for createAppAndHttpTransport
 
 // Export global instances for potential use in test setup/teardown
-export { stdioTransportInstance, httpTransportInstance, globalCacheInstance, eventStoreInstance };
+export {
+  stdioTransportInstance,
+  httpTransportInstance,
+  globalCacheInstance,
+  eventStoreInstance,
+  initializeGlobalInstances
+};
 
 // --- Main Execution Block ---
 /**
