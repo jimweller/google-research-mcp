@@ -1,3 +1,4 @@
+```mermaid
 sequenceDiagram
     participant Client as Client Application
     participant PCache as PersistentCache
@@ -78,3 +79,4 @@ sequenceDiagram
     end
     
     PCache-->>Client: Disposed
+```

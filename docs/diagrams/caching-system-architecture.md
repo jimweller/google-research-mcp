@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     %% Main Components
     Client[Client Application] --> PCache[PersistentCache]
@@ -26,3 +27,4 @@ graph TD
     class InMemCache,PStrategy,PManager component
     class Periodic,WriteThrough,OnShutdown,Hybrid strategy
     class FileSystem storage
+```

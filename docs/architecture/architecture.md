@@ -47,33 +47,28 @@ The server employs a layered architecture that clearly defines the flow of data 
 graph TD
     subgraph "Clients"
         A[MCP Client (CLI/Web/IDE)]
-    end
 
     subgraph "Transport & Security"
         B[STDIO Transport]
         C[HTTP/SSE Transport]
         L[OAuth 2.1 Middleware]
-    end
 
     subgraph "Core Application"
         D{MCP Request Router}
         E[Tool Executor]
         J[Persistent Cache]
         K[Persistent Event Store]
-    end
 
     subgraph "Tools"
         F[google_search]
         G[scrape_page]
         H[analyze_with_gemini]
         I[research_topic]
-    end
 
     subgraph "External Services"
         M[Google Search API]
         N[Web Pages / YouTube]
         O[Google Gemini API]
-    end
 
     A -- Connects via --> B
     A -- Connects via --> C

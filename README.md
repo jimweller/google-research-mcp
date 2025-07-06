@@ -69,30 +69,25 @@ The server is built on a layered architecture designed for clarity, separation o
 graph TD
     subgraph "Client"
         A[MCP Client (CLI/Web)]
-    end
 
     subgraph "Transport Layer"
         B[STDIO]
         C[HTTP/SSE]
-    end
 
     subgraph "Core Logic"
         D{MCP Request Router}
         E[Tool Executor]
-    end
 
     subgraph "Tools"
         F[google_search]
         G[scrape_page]
         H[analyze_with_gemini]
         I[research_topic]
-    end
 
     subgraph "Support Systems"
         J[Persistent Cache]
         K[Event Store]
         L[OAuth Middleware]
-    end
 
     A -- Connects via --> B
     A -- Connects via --> C
