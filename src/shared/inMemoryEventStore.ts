@@ -18,7 +18,7 @@ import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
  * examples, testing, or development use. For production, consider implementing
  * a persistent EventStore using a database or file system.
  *
- * @see https://github.com/google-research/model-context-protocol for MCP documentation
+ * @see https://github.com/zoharbabin/google-research-mcp for MCP documentation
  * @implements EventStore from the MCP SDK
  */
 export class InMemoryEventStore implements EventStore {

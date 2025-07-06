@@ -1,68 +1,60 @@
-# Transport-Specific Caching Considerations
+# Guide: Transport and Caching Consistency
 
-This document provides important information about caching behavior across different transport mechanisms in the Google Researcher MCP Server.
+This document explains how the Google Researcher MCP Server ensures consistent caching behavior across its different transport mechanisms and why this is critical for performance and reliability.
 
-## Overview
+## The Challenge: Multiple Transports, One Cache
 
-The Google Researcher MCP Server supports multiple transport mechanisms:
+The server supports two primary transport methods, as detailed in the [**Architecture Guide**](./architecture/architecture.md):
 
-1. **STDIO Transport**: Communication via standard input/output streams
-2. **HTTP+SSE Transport**: Web-based communication with Server-Sent Events
+1.  **STDIO Transport**: For local, process-based communication.
+2.  **HTTP+SSE Transport**: For remote, web-based communication.
 
-Each transport has different characteristics that can affect caching behavior if not properly configured. Furthermore, the HTTP+SSE transport now mandates OAuth 2.1 security, while the STDIO transport relies on the security of the local execution environment. While this document focuses on ensuring the *caching mechanism* is consistent, developers should be aware of these differing security contexts when choosing or implementing clients.
+A key feature of the server is its **persistent caching system**, which saves the results of expensive operations to disk. For this cache to be effective, all server instances—regardless of which transport they are serving—must read from and write to the *same physical location* on disk.
 
-## Potential Issues
+Without careful management, two major issues could arise:
 
-Without proper configuration, the following issues can occur:
+1.  **Divergent Cache Locations**: If the cache path is relative (e.g., `../storage`), an STDIO server launched from one directory and an HTTP server launched from another would create two separate, unshared caches.
+2.  **Data Loss in Short-Lived Processes**: STDIO server instances are often short-lived, created on-demand by a client. If such a process exits before the cache has a chance to be persisted to disk, valuable cached data would be lost.
 
-- **Different Cache Storage Locations**: If relative paths based on `process.cwd()` (current working directory) are used for storage, different transports might use different cache locations. For example, an STDIO server launched by an IDE might have a different working directory than the main HTTP server process. This prevents cache sharing.
-- **Incomplete Cache Persistence**: Short-lived processes, like those often created for STDIO transport connections, might terminate before periodic cache persistence completes, leading to data loss.
+## The Solution: A Unified Caching Strategy
 
-## Best Practices
+The server implements two core strategies to solve these problems and guarantee a unified cache.
 
-To ensure consistent caching behavior across all transport mechanisms:
+### 1. Global Singleton Instances
 
-### 1. Use Absolute Paths for Storage Locations
+The most critical design choice is the use of **global singleton instances** for both the `PersistentCache` and the `PersistentEventStore`. As of version 1.0.0, these components are initialized *once* when the main server module (`src/server.ts`) is first loaded.
 
-Always use absolute paths for cache and event store storage locations. The `PersistentCache` class now defaults to an absolute path derived from its module location if no `storagePath` is provided, mitigating issues with differing working directories between transports. However, explicitly setting the path remains the recommended approach:
+**How it Works:**
+-   When `src/server.ts` is imported, it creates a single `globalCache` and a single `eventStoreInstance`.
+-   Both the STDIO and HTTP transport initializers receive and use these *exact same instances*.
+-   This ensures that all operations, regardless of their origin, are funneled through the same in-memory cache and the same persistence logic.
 
-```typescript
-// In server.ts
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+This approach effectively eliminates the problem of divergent cache locations at the application level.
 
-// Get the directory name in ES module scope
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+### 2. Robust Shutdown Handling
 
-// Use absolute path for cache storage
-const globalCache = new PersistentCache({
-  // ...other options
-  storagePath: path.resolve(__dirname, '..', 'storage', 'persistent_cache'),
-});
-```
+To prevent data loss in short-lived processes, the `PersistentCache` and `PersistentEventStore` are designed with robust shutdown handling.
 
-### 2. Implement Robust Shutdown Handling
+They listen for all common process termination signals:
+-   `SIGINT` (e.g., Ctrl+C)
+-   `SIGTERM` (e.g., from `kill` or process managers)
+-   `SIGHUP` (when a parent terminal closes)
+-   `beforeExit` (for graceful shutdowns)
 
-Ensure proper cache persistence during process termination by handling all relevant signals:
+When any of these signals are detected, the persistence components trigger a **synchronous, final write-to-disk operation**. This ensures that even if an STDIO process is terminated abruptly by its parent, it has a chance to save its in-memory cache before exiting.
 
-- **SIGINT**: Ctrl+C termination.
-- **SIGTERM**: Normal termination signal (e.g., from process managers).
-- **SIGHUP**: Signal often sent when a controlling terminal is closed or a parent process exits. This is crucial for STDIO transport, as the parent (e.g., an IDE extension) might terminate, and we need the child server process to save its cache before exiting.
-- **Normal exit**: `process.exit()` called or the main script finishes.
+## Security Context Awareness
 
-The `PersistentCache` class implements handlers for all these scenarios to ensure data is properly persisted before the process exits, using synchronous writes during shutdown for maximum reliability.
+It is important to note that while the *caching mechanism* is unified, the *security context* differs between transports:
+-   **HTTP/SSE**: Secured by a mandatory OAuth 2.1 layer.
+-   **STDIO**: Operates within the security context of the local user and the parent process that launched it.
 
-## Implementation Details
+Developers should always be mindful of these differing security models when designing and implementing clients.
 
-For detailed information about the caching system implementation, see:
+## Summary of Benefits
 
-- [Caching System Architecture](./architecture/caching-system-architecture.md)
-- [Event Store Architecture](./architecture/event-store-architecture.md)
-
-## Benefits of These Improvements
-
-- **Consistent Cache Sharing**: All transports use the same cache storage, improving hit rates
-- **Reduced API Calls**: Better caching means fewer calls to external services
-- **Improved Performance**: Faster responses for all clients regardless of transport
-- **Better Resource Utilization**: Reduced redundant computations and network requests
+This unified caching strategy provides:
+-   **Maximum Cache Sharing**: All transports and sessions share the same cache, leading to higher hit rates.
+-   **Improved Performance**: Faster responses for all clients, as a result cached by an HTTP client can be served to an STDIO client, and vice-versa.
+-   **Reduced Costs**: Fewer redundant calls are made to external APIs.
+-   **Data Integrity**: Robust shutdown handling minimizes the risk of data loss.

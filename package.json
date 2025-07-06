@@ -1,7 +1,31 @@
 {
   "name": "google-researcher-mcp",
   "version": "1.0.0",
-  "description": "Model Context Protocol server for research and web access",
+  "description": "An MCP server providing Google Search, web scraping, and Gemini AI analysis tools to empower AI assistants with research capabilities.",
+  "author": {
+    "name": "Zohar Babin",
+    "url": "https://github.com/zoharbabin"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/zoharbabin/google-research-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zoharbabin/google-research-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zoharbabin/google-research-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "agent",
+    "research",
+    "google-search",
+    "gemini",
+    "scraping",
+    "llm"
+  ],
   "type": "module",
   "scripts": {
     "test:e2e": "npm run build && npm run test:e2e:stdio && echo 'Attempting to kill process on port 3000...' && (PID_TO_KILL=$(lsof -ti tcp:3000) && kill $PID_TO_KILL || echo 'No process found on port 3000.') && sleep 2 && echo 'Starting server for SSE test...' && npm run start & SERVER_PID=$! && echo \"Server PID: $SERVER_PID\" && sleep 10 && echo 'Running SSE test...' && npm run test:e2e:sse ; TEST_EXIT_CODE=$? ; echo 'Killing SSE test server (PID: $SERVER_PID)...' && kill $SERVER_PID && exit $TEST_EXIT_CODE",

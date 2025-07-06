@@ -5,85 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased-0.2] - 2025-07-06
+## [Unreleased]
 
 ### Added
-- **Timeout Protection & Reliability:** Implemented comprehensive timeout handling to enhance stability and prevent "Connection closed" errors.
-    - **Individual Timeouts:** Added specific timeouts for each external operation: Google Search (10s), Web Scraping (15s), and Gemini Analysis (30s).
-    - **Graceful Degradation:** Integrated `Promise.allSettled` in the `research_topic` tool to ensure it can complete even if some web pages fail to scrape, improving overall resilience.
-    - **Content Size Management:** Enforced limits to prevent resource exhaustion: 50KB per scraped page, 300KB total combined content, and 200KB for Gemini analysis input.
-    - **Enhanced Error Recovery:** Improved logging for timeout events and implemented fallback mechanisms to allow processes to continue despite partial failures.
-    - *Files*: `src/server.ts` (and related tool logic).
-    - *Docs*: `docs/testing/timeout-fixes-verification-report.md`.
-- **Comprehensive Timeout Test Suite:** Added a new end-to-end test suite to validate timeout protections, graceful degradation, and error handling.
-    - Verifies that individual timeouts trigger correctly and that the system remains stable under stress.
-    - Confirms 100% pass rate for all timeout-related scenarios.
-    - *Files*: `tests/e2e/comprehensive_timeout_test.js`.
-    - *Docs*: `docs/testing-guide.md`.
+- Comprehensive documentation review and enhancement for public release readiness.
 
-### Changed
-- **Test Infrastructure:** Reorganized end-to-end tests into a dedicated `tests/e2e/` directory to improve structure and clarity.
-    - *Files*: Moved `e2e_*.mjs` tests into `tests/e2e/`.
-- **Build Process:** Removed `src/server.batch.spec.ts` from the primary source directory as it was part of the test reorganization.
-
-## [Unreleased-0.1] - 2025-05-04
-
-### Security
-- **Implemented OAuth 2.1 Resource Server for HTTP Transport:**
-    - Added mandatory Bearer token validation for all protected HTTP endpoints (`/mcp`, management APIs). Clients must now obtain tokens from an external Authorization Server (AS).
-    - Integrated `jsonwebtoken` for token verification and `jwks-rsa` for fetching/caching the AS's JSON Web Key Set (JWKS).
-    - Implemented multi-layer JWKS caching (`jwks-rsa` internal cache + server's `PersistentCache`) for performance and resilience.
-    - Validates standard JWT claims (`iss`, `aud`, `exp`, `nbf`) against configured AS details (`OAUTH_ISSUER_URL`, `OAUTH_AUDIENCE`).
-    - Defined and enforced granular OAuth scopes (e.g., `mcp:tool:google_search:execute`, `mcp:admin:cache:read`) via `requireScopes` middleware. See `src/shared/oauthScopes.ts` for full list.
-    - Added HTTPS enforcement in the middleware for production environments.
-    - Removed legacy static API key checks for HTTP management endpoints (now secured by OAuth scopes).
-    - *Files*: `src/shared/oauthMiddleware.ts`, `src/shared/oauthScopes.ts`, `src/server.ts`
-    - *Docs*: `docs/plans/security-improvements-implementation-guide.md`
-    - *Related Issues*: #3, #4, #7 (GitHub Issues)
+## [1.0.0] - 2025-07-06
 
 ### Added
-- **OAuth Endpoints:**
-    - `GET /mcp/oauth-config`: New public endpoint to view server OAuth configuration (enabled status, issuer, audience).
-    - `GET /mcp/oauth-scopes`: New public endpoint serving markdown documentation for all defined OAuth scopes.
-    - `GET /mcp/oauth-token-info`: New authenticated endpoint to view details (subject, issuer, scopes, expiry) of the provided valid Bearer token.
-    - *Files*: `src/server.ts`, `src/shared/oauthScopesDocumentation.js`
-- **OAuth Testing:**
-    - Added unit tests for OAuth middleware logic (`oauthMiddleware.spec.ts`).
-    - Added unit tests for OAuth scope definitions and validation helpers (`oauthScopes.spec.ts`).
-    - *Files*: `src/shared/oauthMiddleware.spec.ts`, `src/shared/oauthScopes.spec.ts`
+- **Timeout Protection & Reliability:** Implemented comprehensive timeout handling for all external API calls (`google_search`, `scrape_page`, `analyze_with_gemini`) to enhance stability and prevent connection errors.
+- **Graceful Degradation:** The `research_topic` tool now continues processing even if some sources fail, ensuring more resilient outcomes.
+- **Resource Limiting:** Enforced content size limits to prevent resource exhaustion during scraping and analysis.
+- **Comprehensive Timeout Test Suite:** A new end-to-end test suite (`tests/e2e/comprehensive_timeout_test.js`) validates all timeout and error handling mechanisms.
+- **OAuth Endpoints:** Added public endpoints for OAuth configuration (`/mcp/oauth-config`) and scope documentation (`/mcp/oauth-scopes`), and an authenticated endpoint to inspect tokens (`/mcp/oauth-token-info`).
+- **OAuth Testing:** Added extensive unit tests for the OAuth middleware and scope validation logic.
 
 ### Changed
-- **Server Architecture:**
-    - Refactored `src/server.ts` initialization to use global singleton instances for `PersistentCache` and `PersistentEventStore`, ensuring consistency across transports and sessions.
-    - Updated HTTP transport setup to use `StreamableHTTPServerTransport` from MCP SDK v1.11.0.
-    - *Files*: `src/server.ts`
-- **Testing & Test Hygiene:**
-    - Disabled internal timers (e.g., periodic persistence/cleanup in `PersistentCache`, `PersistentEventStore`) during tests (`NODE_ENV === 'test'`) to prevent open handles and improve test stability.
-    - Reduced console logging noise from cache and event store components during test runs.
-    - *Files*: `src/cache/cache.ts`, `src/cache/persistentCache.ts`, `src/shared/eventPersistenceManager.ts`, `src/shared/persistentEventStore.ts`, `jest.setup.js`
-- **Dependencies:**
-    - Updated MCP SDK to `^1.11.0` (Assumed prerequisite for transport changes).
-    - Added `jsonwebtoken`, `jwks-rsa` dependencies for OAuth validation.
-    - *Files*: `package.json`, `package-lock.json`
-- **Configuration:**
-    - Server now requires `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` environment variables when using HTTP transport security.
-    - *Files*: `.env.example` (implicitly), `src/server.ts`
-- **Build Process Improvements:**
-  - Converted `src/shared/oauthScopesDocumentation.js` to TypeScript (`src/shared/oauthScopesDocumentation.ts`)
-  - Removed the `copy-js-files.js` build step
-  - Simplified the build process to use TypeScript's compiler directly
-  - *Files*: `src/shared/oauthScopesDocumentation.ts`, `package.json`
+- **Security Model:** Implemented a mandatory OAuth 2.1 Bearer token validation for all protected HTTP endpoints, replacing legacy static API keys. The system uses `jsonwebtoken` and `jwks-rsa` for robust, standard-compliant token verification.
+- **Server Architecture:** Refactored the server to use global singleton instances for the `PersistentCache` and `PersistentEventStore`, ensuring data consistency across all transports and sessions.
+- **Test Infrastructure:** Reorganized all end-to-end tests into a dedicated `tests/e2e/` directory for improved clarity.
+- **Test Hygiene:** Disabled internal timers during test runs (`NODE_ENV === 'test'`) to prevent open handles and improve test stability.
+- **Dependencies:** Updated to `@modelcontextprotocol/sdk` version `1.11.0` and added `jsonwebtoken` and `jwks-rsa` for security.
+- **Build Process:** Converted all remaining JavaScript files in `src/` to TypeScript and simplified the build process.
 
 ### Removed
-- Removed static API key check (`CACHE_ADMIN_KEY`) previously used for HTTP management endpoints (`/mcp/cache-invalidate`, `/mcp/cache-persist`). Access is now controlled solely via OAuth scopes (`mcp:admin:cache:invalidate`, `mcp:admin:cache:persist`).
-    - *Files*: `src/server.ts`
+- **Static API Key Checks:** Removed the insecure `CACHE_ADMIN_KEY` check for management endpoints. Access is now controlled exclusively by granular OAuth scopes.
 
 ### Documentation
-- Created this `docs/CHANGELOG.md` file.
-- Updated `README.md`: Added OAuth security section, listed new management endpoints, revised HTTP client example to include token requirement note, clarified Roo Code example regarding OAuth.
-- Updated `docs/plans/security-improvements-implementation-guide.md`: Revised significantly to reflect the actual implemented OAuth RS strategy, middleware details, JWKS handling, scope definitions, and updated implementation status.
-- Updated `docs/architecture/architecture.md`: Added OAuth security layer to HTTP transport description, updated server initialization description for global instances, added new OAuth endpoints to Management API list.
-- Updated `docs/testing-guide.md`: Added note on disabling internal timers in tests, added section describing OAuth testing strategy (mocking AS, test JWTs, scope checks).
-- Updated `docs/transport-caching-considerations.md`: Added note clarifying the differing security models between HTTP (OAuth) and STDIO (local trust) transports.
-- Updated `docs/plans/mcp_server_improvement_plan.md`: Marked core OAuth and related SDK/transport update tasks as complete, revised priorities and next steps.
-- *Related Issues*: #9, #19 (GitHub Issues)
+- **Complete Overhaul:** Updated all major documentation files, including the `README.md`, `CONTRIBUTING.md`, and architecture documents, to reflect the current implementation, security model, and best practices.
+- **New Guides:** Created detailed guides for testing, security configuration, and system architecture.
+- **Changelog:** Created and formatted this `CHANGELOG.md` to track all notable changes.

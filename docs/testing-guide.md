@@ -1,376 +1,145 @@
-# Testing Guide for Google Researcher MCP Server
+# Testing Guide
 
-This document provides detailed information about the testing architecture, strategies, and best practices for the Google Researcher MCP Server project.
+This document provides a comprehensive guide to the testing architecture, strategies, and best practices for the Google Researcher MCP Server. A robust testing strategy is essential for maintaining code quality, ensuring reliability, and enabling confident contributions.
 
 ## Table of Contents
 
-- [Testing Architecture](#testing-architecture)
-- [Types of Tests](#types-of-tests)
-- [Running Tests](#running-tests)
-- [Mocking Strategies](#mocking-strategies)
-- [Writing New Tests](#writing-new-tests)
-- [Troubleshooting](#troubleshooting)
+1.  [**Testing Philosophy**](#testing-philosophy)
+2.  [**Test Architecture**](#test-architecture)
+    -   [Framework and Configuration](#framework-and-configuration)
+    -   [Directory Structure](#directory-structure)
+3.  [**Types of Tests**](#types-of-tests)
+    -   [Component Tests (Unit & Integration)](#component-tests)
+    -   [End-to-End (E2E) Tests](#end-to-end-e2e-tests)
+4.  [**Running Tests**](#running-tests)
+    -   [Available Scripts](#available-scripts)
+    -   [Running Specific Tests](#running-specific-tests)
+5.  [**Code Coverage**](#code-coverage)
+6.  [**Mocking and Test Strategies**](#mocking-and-test-strategies)
+    -   [Mocking External Services](#mocking-external-services)
+    -   [Testing the OAuth 2.1 Layer](#testing-the-oauth-21-layer)
+7.  [**Writing New Tests**](#writing-new-tests)
+8.  [**Troubleshooting**](#troubleshooting)
 
-## Testing Architecture
+---
 
-### Jest Configuration
+## Testing Philosophy
 
-The project uses Jest as its testing framework with TypeScript support through ts-jest. The configuration is defined in `jest.config.js`:
+Our testing strategy is pragmatic, focusing on a balanced "testing pyramid" that prioritizes different types of tests for maximum value:
 
-- **Preset**: `ts-jest/presets/default-esm` for ESM support
-- **Environment**: Node.js
-- **Test Match**: `['<rootDir>/src/**/*.spec.ts']` to find all test files
-- **Setup Files**: `['<rootDir>/jest.setup.js']` for additional configuration
+-   **End-to-End Tests** form the foundation, validating the entire system from the client's perspective. They ensure the server's core promises—tool execution, reliability, and security—are met.
+-   **Focused Component Tests** (a mix of unit and integration tests) target the complex, stateful logic unique to this server, such as the caching and event store systems.
 
-Additional setup files:
-- `jest.setup.js`: Configures Jest's fake timers (see [Time Mocking](#time-mocking)) and suppresses console output during default test runs (see [Running Tests](#running-tests)). Note that core components like the cache and event store also disable internal timers (e.g., for periodic persistence) when `process.env.NODE_ENV === 'test'` to prevent open handles during test execution.
+This approach provides high confidence in the overall system behavior while keeping the test suite maintainable and fast.
 
-### Test Directory Structure
+## Test Architecture
 
-Tests are organized into two primary locations: unit/integration tests alongside the source code they validate, and end-to-end tests in a dedicated `tests/` directory.
+### Framework and Configuration
 
-#### Unit & Integration Tests (`src/`)
+-   **Framework**: [Jest](https://jestjs.io/) is used for all component tests.
+-   **TypeScript Support**: [ts-jest](https://kulshekhar.github.io/ts-jest/) enables running tests written in TypeScript.
+-   **Configuration**:
+    -   `jest.config.js`: The main configuration file.
+    -   `jest.setup.js`: A setup file used to configure Jest's fake timers and suppress console output during tests to keep results clean. It also ensures that internal timers within the application (like cache persistence) are disabled when `NODE_ENV === 'test'` to prevent open handles.
 
-These tests are co-located with the source code to ensure they are tightly coupled with the component they are testing.
+### Directory Structure
 
-```
-src/
-├── cache/
-│   ├── cache.ts
-│   └── cache.spec.ts            # Unit tests for Cache class
-├── shared/
-│   ├── persistentEventStore.ts
-│   └── persistentEventStore.spec.ts  # Unit tests for event store
-```
-
-#### End-to-End Tests (`tests/e2e/`)
-
-All end-to-end tests are located in the `tests/e2e/` directory. This provides a clear separation between component-level tests and system-level validation.
-
-```
-tests/
-└── e2e/
-    ├── comprehensive_timeout_test.js    # E2E test for timeout handling and reliability
-    ├── e2e_stdio_mcp_client_test.mjs    # E2E test for STDIO transport
-    └── e2e_sse_mcp_client_test.mjs      # E2E test for SSE transport
-```
-
-### Test File Naming Conventions
-
-- **Unit/Integration Tests**: `*.spec.ts`, located in the same directory as the module being tested.
-- **End-to-End Tests**: `*.{js,mjs}`, located in the `tests/e2e/` directory.
+-   **Component Tests (`src/**/*.spec.ts`)**: Tests are co-located with the source code they validate. This makes it easy to find and maintain tests for a specific module.
+-   **End-to-End Tests (`tests/e2e/`)**: All E2E tests reside in a dedicated top-level directory, providing a clear separation from the application source code.
 
 ## Types of Tests
 
-### Unit Tests
+### Component Tests
 
-Unit tests verify the functionality of individual components in isolation, using mocks for dependencies.
+These tests, written with Jest, cover the internal logic of the server's most critical components.
 
-#### Cache System Tests
+-   **Cache System** (`src/cache/*.spec.ts`):
+    -   Verifies core cache logic (TTL, LRU eviction).
+    -   Tests the `PersistenceManager`'s file I/O operations.
+    -   Validates different `PersistenceStrategies`.
+-   **Event Store** (`src/shared/*.spec.ts`):
+    -   Tests event storage, retrieval, and expiration.
+    -   Validates the `EventPersistenceManager`'s file I/O.
+-   **OAuth Security** (`src/shared/oauth*.spec.ts`):
+    -   Tests the `oauthMiddleware` logic with mock JWTs.
+    -   Verifies the `requireScopes` enforcement.
 
-These tests verify:
-- Core cache functionality (get, set, compute, invalidate)
-- TTL handling and expiration
-- LRU eviction when size limits are reached
-- Statistics tracking
-- Different persistence strategies:
-  - Periodic persistence
-  - Write-through persistence
-  - Hybrid persistence
+### End-to-End (E2E) Tests
 
-**Files:**
-- `src/cache/cache.spec.ts`: Tests for the base Cache class
-- `src/cache/persistenceStrategies.spec.ts`: Tests for different persistence strategies
+E2E tests are plain JavaScript/TypeScript files that use the MCP SDK to interact with a running instance of the server. They validate the system as a whole.
 
-#### Event Store Tests
-
-These tests verify:
-- Core event storage and retrieval
-- Event persistence and loading
-- Stream and global limits enforcement
-- Event expiration based on TTL
-
-**Files:**
-- `src/shared/persistentEventStore.spec.ts`: Tests for the PersistentEventStore class with mocked dependencies
-
-### Integration Tests
-
-Integration tests verify the interaction between components, often using real file system operations.
-
-#### Cache Integration Tests
-
-These tests verify:
-- Persistence manager file operations
-- Persistent cache initialization and disk operations
-- Cache entry loading and saving
-
-**Files:**
-- `src/cache/persistenceManager.spec.ts`: Tests for file system operations
-- `src/cache/persistentCache.spec.ts`: Tests for the persistent cache with real persistence manager
-
-#### Event Store Integration Tests
-
-These tests verify:
-- Event persistence manager file operations
-- Event loading and saving
-
-**Files:**
-- `src/shared/eventPersistenceManager.spec.ts`: Tests for event persistence file operations
-
-### End-to-End Tests
-
-End-to-end tests verify the complete system functionality from client connection to tool execution. **Note:** These tests interact with external services and may require specific environment variables (like API keys) to be configured. Refer to `.env.example` for required variables.
-
-#### STDIO Client Test (`tests/e2e/e2e_stdio_mcp_client_test.mjs`)
-
-Tests the MCP server with a direct process STDIO connection, covering:
-- Client connection and tool discovery.
-- Execution of all primary tools (`google_search`, `scrape_page`, `analyze_with_gemini`, `research_topic`).
-- Core functionality like YouTube transcript handling.
-
-#### SSE Client Test (`tests/e2e/e2e_sse_mcp_client_test.mjs`)
-
-Tests the MCP server with an HTTP+SSE connection, validating the same functionality as the STDIO test but over the network transport.
-
-#### Comprehensive Timeout Test Suite (`tests/e2e/comprehensive_timeout_test.js`)
-
-This is a critical test suite focused on verifying the server's reliability and resilience, specifically addressing the timeout fixes. It validates:
-- **Individual Timeouts:** Ensures that timeouts for Google Search, web scraping, and Gemini analysis trigger correctly.
-- **Graceful Degradation:** Uses `Promise.allSettled` to confirm that the `research_topic` tool can complete successfully even if some operations fail.
-- **Content Size Limits:** Verifies that the server correctly handles and truncates large content to prevent resource exhaustion.
-- **Error Recovery:** Checks for clear error logging and proper fallback mechanisms.
-- **Stress Testing:** Includes tests for concurrent operations and problematic (e.g., slow) URLs to ensure the system remains stable.
-
-For a detailed summary of the results and fixes verified by this suite, see the **[Timeout Fixes Verification Report](./testing/timeout-fixes-verification-report.md)**.
+-   `e2e_stdio_mcp_client_test.mjs`: Tests the server over the **STDIO transport**.
+-   `e2e_sse_mcp_client_test.mjs`: Tests the server over the **HTTP/SSE transport**.
+-   `comprehensive_timeout_test.js`: A crucial suite that verifies the server's **reliability features**, including API timeouts, graceful degradation of the `research_topic` tool, and content size limiting. For a detailed report on what this test verifies, see the [**Timeout Fixes Verification Report**](./timeout-fixes-verification-report.md).
 
 ## Running Tests
 
-### Running All Tests
+All test commands are defined as scripts in `package.json`.
+
+### Available Scripts
+
+| Script                | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| `npm test`            | Runs all component tests (`*.spec.ts`) using Jest.                       |
+| `npm run test:coverage` | Runs component tests and generates a detailed code coverage report.      |
+| `npm run test:verbose`| Runs component tests with verbose output, including `console.log`.       |
+| `npm run test:e2e`    | Executes the full E2E suite for both STDIO and SSE transports.           |
+
+### Running Specific Tests
+
+You can pass arguments to Jest to run specific files or tests.
 
 ```bash
-npm test
+# Run tests in a specific file
+npm test -- src/cache/cache.spec.ts
+
+# Run tests with a name matching a pattern
+npm test -- -t "should evict least recently used item"
 ```
 
-This command runs all unit and integration tests using Jest. By default, it suppresses console logs unless a test fails and does not generate a coverage report.
+## Code Coverage
 
-### Running Tests with Coverage
+We aim for high code coverage on our critical, stateful components to ensure their logic is thoroughly tested. You can generate a coverage report by running:
 
 ```bash
 npm run test:coverage
 ```
 
-This command runs tests and generates a coverage report.
+The report will be generated in the `coverage/` directory. Open `coverage/lcov-report/index.html` in your browser to view the detailed results. While we don't enforce a strict percentage, pull requests that include new logic should also include corresponding tests.
 
-### Running Tests with Verbose Output
+## Mocking and Test Strategies
 
-```bash
-npm run test:verbose
-```
+### Mocking External Services
 
-This command runs tests with detailed output, including console logs for passing tests.
+For component tests, we mock all external dependencies to ensure tests are fast, reliable, and isolated.
 
-### Running End-to-End Tests
+-   **File System**: The `fs/promises` module is mocked using `jest.mock()` for unit tests that shouldn't touch the disk. For integration tests, we write to temporary directories that are cleaned up afterward.
+-   **Timers**: We use Jest's fake timers (`jest.useFakeTimers()`) to test time-dependent logic like cache expiration without waiting for real time to pass.
 
-```bash
-# Run all end-to-end tests in the tests/e2e/ directory
-npm run test:e2e
+### Testing the OAuth 2.1 Layer
 
-# Run only the STDIO end-to-end test
-npm run test:e2e:stdio
+Testing the security layer is critical. Our strategy involves:
 
-# Run only the SSE end-to-end test
-npm run test:e2e:sse
+1.  **Mocking the Authorization Server**: We use mocks to simulate the external JWKS endpoint, providing a controlled set of public keys for token verification.
+2.  **Generating Test JWTs**: We create a variety of test tokens (valid, expired, invalid signature, incorrect scopes) signed with a private key that corresponds to our mocked public key.
+3.  **Verifying Middleware Logic**: We write unit tests that pass these mock tokens to the `oauthMiddleware` and `requireScopes` functions to assert that they correctly accept valid tokens and reject invalid ones with the appropriate HTTP status codes (401 or 403).
 
-# Run the comprehensive timeout test suite
-npm run test:e2e:timeout
-```
-
-These commands execute the various end-to-end test suites to validate the server's functionality, reliability, and transport methods.
-
-### Running Specific Tests
-
-```bash
-# Run tests matching a pattern
-npm test -- -t "should store and retrieve events"
-
-# Run tests in a specific file
-npm test -- src/cache/cache.spec.ts
-```
-
-## Mocking Strategies
-
-Mocking involves replacing parts of the system (like external services or modules) with controlled replacements (mocks). This helps isolate the component being tested and makes tests faster and more reliable.
-
-### File System Mocking
-
-For unit tests, mock the file system to avoid actual disk I/O:
-
-```typescript
-// Mock the fs/promises module
-jest.mock('fs/promises', () => ({
-  __esModule: true,
-  mkdir: jest.fn().mockResolvedValue(undefined),
-  writeFile: jest.fn().mockResolvedValue(undefined),
-  readFile: jest.fn().mockResolvedValue('{"mock":"data"}'),
-  // ... other mocked methods ...
-}));
-```
-
-For integration tests, use temporary directories:
-
-```typescript
-// Create a temporary directory for testing
-tempDir = path.join(process.cwd(), 'storage', 'test', `cache_test_${Date.now()}`);
-await fs.mkdir(tempDir, { recursive: true });
-
-// Clean up after the test
-await fs.rm(tempDir, { recursive: true, force: true });
-```
-
-### Time Mocking
-
-For time-dependent tests (like checking cache expiration), Jest's fake timers are used. Fake timers allow you to control the passage of time within your tests, making them deterministic and fast, without waiting for real time to pass.
-
-```typescript
-// Enable fake timers
-jest.useFakeTimers();
-
-// Advance time
-jest.advanceTimersByTime(ttl - 1);
-
-// Clean up
-jest.useRealTimers();
-```
-
-### Encryption and Authorization Mocking
-
-For security feature tests, mock implementations are provided:
-
-```typescript
-// Mock key provider
-const mockKeyProvider = async () => {
-  return crypto.scryptSync('test-secret', 'salt', 32);
-};
-
-// Mock authorizer
-const mockAuthorizer = async (streamId: string, userId?: string) => {
-  return streamId === 'stream1' && userId === 'user1';
-};
-```
-
-### OAuth 2.1 Middleware Testing
-
-Testing the OAuth middleware (`src/shared/oauthMiddleware.ts`) involves:
-- **Mocking the Authorization Server (AS):** Using tools like `nock` or Jest mocks to simulate the external AS's JWKS endpoint (`/.well-known/jwks.json`).
-- **Generating Test JWTs:** Creating JWTs with various claims (valid, expired, wrong issuer/audience, different scopes) signed with keys corresponding to the mocked JWKS. Libraries like `jose` or `jsonwebtoken` can be used.
-- **Unit Testing Middleware Logic:** Verifying token extraction, signature validation, claim checks (issuer, audience, expiry), and scope enforcement. Testing correct `401`/`403` responses for various error conditions.
-- **Testing JWKS Handling:** Validating JWKS fetching, caching, and key rotation scenarios.
-
-Refer to the [Security Improvements Guide](../plans/security-improvements-implementation-guide.md#3-token-validation-middleware) for a detailed testing strategy.
-
-**Files:**
-- `src/shared/oauthMiddleware.spec.ts`: Tests for the OAuth middleware components.
-- `src/shared/oauthScopes.spec.ts`: Tests for scope definition and validation logic.
+This strategy allows us to thoroughly test our security implementation without relying on an external identity provider.
 
 ## Writing New Tests
 
-### Unit Test Example
+When contributing code, please include tests.
 
-```typescript
-describe('Cache', () => {
-  let cache: Cache;
-  let mockNow: number;
+-   **For New Features**: Add new component tests for any new internal logic and consider adding a case to the E2E tests to validate the feature from a client's perspective.
+-   **For Bug Fixes**: Start by writing a failing test that reproduces the bug. This proves the bug exists and confirms when it has been fixed.
 
-  beforeEach(() => {
-    // Create a new cache instance before each test
-    cache = new Cache({ defaultTTL: 1000, maxSize: 5 });
-    
-    // Mock the now() method to control time
-    mockNow = Date.now();
-    jest.spyOn(cache as any, 'now').mockImplementation(() => mockNow);
-  });
-
-  afterEach(() => {
-    // Clean up after each test
-    cache.dispose();
-    jest.restoreAllMocks();
-  });
-
-  it('should store and retrieve values', async () => {
-    const computeFn = jest.fn<() => Promise<string>>().mockResolvedValue('computed value');
-    
-    // First call should compute
-    const result1 = await cache.getOrCompute('test', { id: 1 }, computeFn);
-    expect(result1).toBe('computed value');
-    expect(computeFn).toHaveBeenCalledTimes(1);
-    
-    // Second call should use cache
-    const result2 = await cache.getOrCompute('test', { id: 1 }, computeFn);
-    expect(result2).toBe('computed value');
-    expect(computeFn).toHaveBeenCalledTimes(1); // Still only called once
-  });
-});
-```
-
-### End-to-End Test Example
-
-```javascript
-// Test google_search tool
-const {
-  content: [{ text: url }]
-} = await client.callTool({
-  name: "google_search",
-  arguments: { query: "example.com", num_results: 1 }
-});
-assert(url.startsWith("http"));
-console.log("✨ google_search OK:", url);
-```
-
-### Best Practices
-
-1. **Isolation**: Each test should be independent and not rely on the state from other tests
-2. **Cleanup**: Always clean up resources in `afterEach` or `afterAll` blocks
-3. **Mock External Dependencies**: Use mocks for external services, file systems, etc.
-4. **Clear Assertions**: Make assertions specific and descriptive
-5. **Test Edge Cases**: Include tests for error conditions and edge cases
-6. **Avoid Test Interdependence**: Don't create tests that depend on the order of execution
+**Best Practices**:
+-   Keep tests small, focused, and independent.
+-   Use descriptive names for your `describe` and `it` blocks.
+-   Always clean up resources (e.g., temporary files, mocks) in `afterEach` or `afterAll` blocks.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Open Handles
-
-If tests fail with warnings about open handles:
-- Check for unclosed file handles
-- Ensure all timers are cleared with `jest.useRealTimers()`
-- Verify that event listeners are removed
-- Run tests with `npm run test:fix` (which uses `--no-cache`) to help identify the issue
-
-#### Flaky Tests
-
-For tests that pass inconsistently:
-- Avoid relying on exact timing
-- Use Jest's fake timers instead of real timeouts
-- Ensure proper cleanup between tests
-- Add more specific assertions to identify the failure point
-
-#### Slow Tests
-
-If tests are running too slowly:
-- Mock expensive operations
-- Use more focused test files
-- Run specific tests instead of the entire suite during development
-
-### Debugging Techniques
-
-1. **Console Logging**: Add temporary `console.log` statements
-2. **Jest --verbose**: Run tests with `npm run test:verbose`
-3. **Inspect Mocks**: Use `mockFn.mock.calls` to inspect how mocks were called
-4. **Breakpoints**: Use the Node.js debugger with `--inspect-brk`
-
-```bash
-node --inspect-brk node_modules/.bin/jest --runInBand path/to/test.js
-```
-
-Then connect with Chrome DevTools or VS Code debugger.
+-   **Open Handles Warning**: This usually means a resource (like a timer or file handle) was not properly closed. Ensure `jest.useRealTimers()` is called after using fake timers, and check that all asynchronous operations have completed. The `NODE_ENV === 'test'` check in our core components helps prevent this by disabling periodic background tasks.
+-   **Flaky Tests**: If a test passes inconsistently, it may have a race condition or a dependency on real time. Refactor to use fake timers or ensure all async operations are properly awaited.
+-   **Debugging**: Use `console.log` for quick debugging, or run Jest with the `--inspect-brk` flag to attach a full debugger.

@@ -1,105 +1,115 @@
-# Contributing to Google Researcher MCP Server
+# Contributing to the Google Researcher MCP Server
 
-First off, thank you for considering contributing to Google Researcher MCP Server! It's people like you that make this project better for everyone. This document provides guidelines and steps for contributing.
+First and foremost, thank you for considering contributing! It's people like you that make this open-source project a powerful and reliable tool for the community. Every contribution is valuable, whether it's a bug report, a new feature, or a documentation improvement.
 
-## Ways to Contribute
+To ensure a smooth and collaborative process, please read through these guidelines before you begin.
 
-There are many ways to contribute to this project:
+## Code of Conduct
 
-- **Code Contributions**: Implement new features or fix bugs
-- **Documentation**: Improve or add documentation
-- **Bug Reports**: Submit detailed bug reports
-- **Feature Requests**: Suggest new features or improvements
-- **Testing**: Help test the project and report issues
+We are committed to fostering an open and welcoming environment. All contributors are expected to adhere to our [**Code of Conduct**](./CODE_OF_CONDUCT.md). Please take a moment to read it before participating.
 
-## Development Setup
+## How Can I Contribute?
 
-1. **Fork the Repository**
-   ```bash
-   git clone <your-fork-url>
-   cd google-researcher-mcp
-   ```
+- **Reporting Bugs**: If you find a bug, please create a detailed issue in our [GitHub Issues](https://github.com/zoharbabin/google-research-mcp/issues).
+- **Suggesting Enhancements**: Have an idea for a new feature or an improvement? Open an issue to discuss it.
+- **Writing Code**: Help fix bugs or implement new features.
+- **Improving Documentation**: Correct typos, clarify confusing sections, or add new examples.
+- **Testing**: Help us ensure reliability by running tests and reporting any failures.
 
-2. **Install Dependencies**
-   ```bash
-   npm install
-   ```
+## Getting Started: Your First Contribution
 
-3. **Configure Environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
+### Development Environment Setup
 
-4. **Run in Development Mode**
-   ```bash
-   npm run dev
-   ```
+1.  **Fork the Repository**:
+    Click the "Fork" button at the top right of the [project page](https://github.com/zoharbabin/google-research-mcp).
 
-## Pull Request Process
+2.  **Clone Your Fork**:
+    ```bash
+    git clone https://github.com/YOUR_USERNAME/google-research-mcp.git
+    cd google-researcher-mcp
+    ```
 
-1. **Create a Branch**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
+3.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-2. **Make Your Changes**
-   - Write code that follows our coding standards
-   - Add or update tests as necessary
-   - Update documentation to reflect your changes
+4.  **Configure Your Environment**:
+    Copy the example environment file and add your API keys.
+    ```bash
+    cp .env.example .env
+    ```
+    *Note: You only need to fill in the keys for the services you intend to test or use.*
 
-3. **Run Tests**
-   ```bash
-   npm test
-   ```
+5.  **Run the Server in Development Mode**:
+    ```bash
+    npm run dev
+    ```
+    This will start the server and automatically reload it when you make changes.
 
-4. **Commit Your Changes**
-   ```bash
-   git commit -m "Description of changes"
-   ```
+### Making Changes
 
-5. **Push to Your Fork**
-   ```bash
-   git push origin feature/your-feature-name
-   ```
+1.  **Create a New Branch**:
+    Work on a separate branch to keep your changes organized.
+    ```bash
+    git checkout -b feature/my-awesome-feature
+    ```
 
-6. **Submit a Pull Request**
-   - Fill in the pull request template
-   - Reference any related issues
-   - Describe what your changes do and why they should be included
+2.  **Write Your Code**:
+    - Adhere to the existing code style and conventions.
+    - Write clear, commented code, especially for complex logic.
+    - Ensure your code is covered by tests.
 
-7. **Code Review**
-   - Maintainers will review your code
-   - Address any feedback or requested changes
-   - Once approved, your PR will be merged
+3.  **Run Tests**:
+    Before submitting, ensure all tests pass.
+    ```bash
+    npm test
+    ```
+    To check test coverage:
+    ```bash
+    npm run test:coverage
+    ```
 
-## Coding Standards
+4.  **Commit Your Changes**:
+    Use a clear and descriptive commit message. We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+    ```bash
+    git commit -m "feat: Add support for a new scraping library"
+    ```
 
-- Follow the existing code style
-- Use meaningful variable and function names
-- Write clear comments for complex logic
-- Keep functions focused on a single responsibility
-- Add appropriate error handling
+5.  **Push to Your Fork**:
+    ```bash
+    git push origin feature/my-awesome-feature
+    ```
 
-## Testing
+## Submitting a Pull Request
 
-- Write tests for new features.
-- Ensure all tests pass (`npm test`) before submitting a PR.
-- Aim for good test coverage (check with `npm run test:coverage`).
-- Refer to the [Testing Guide](./testing-guide.md) for detailed information on running different types of tests (unit, integration, e2e) and debugging.
+When you're ready, open a pull request from your fork to the main repository.
 
-## Documentation
+- **Provide a Clear Title and Description**: Explain the "what" and "why" of your changes.
+- **Link to Relevant Issues**: If your PR addresses an open issue, link it using `Closes #123`.
+- **Keep it Focused**: A pull request should address one specific feature or bug.
+- **Allow Edits from Maintainers**: This helps us make small fixes or updates to your PR more efficiently.
 
-- Update documentation for any changed functionality
-- Document new features thoroughly
-- Use clear, concise language
+## Coding and Style Guidelines
+
+- **TypeScript**: We use TypeScript for type safety. Please include types for all new code.
+- **ESLint**: Our project uses ESLint to enforce a consistent code style. Run `npm run lint` to check your code.
+- **Prettier**: We use Prettier for automatic code formatting.
+- **Error Handling**: All functions should handle potential errors gracefully.
+
+## Documentation Standards
+
+- If you add a new feature, please document it in the `README.md` or relevant files in the `docs/` directory.
+- If you change existing functionality, update the corresponding documentation.
+
+## Versioning and Changelog
+
+We use [Semantic Versioning](http.semver.org). All changes are recorded in the [**CHANGELOG.md**](./CHANGELOG.md) file. For any user-facing change, please add an entry to the changelog under the "Unreleased" section.
+
+## Reporting Security Vulnerabilities
+
+If you discover a security vulnerability, please do **not** open a public issue. Instead, send a private email to `[PROJECT_SECURITY_EMAIL]`. We will address it as quickly as possible.
 
 ## License
 
-By contributing to this project, you agree that your contributions will be licensed under the project's [MIT License](../LICENSE).
-
-## Questions?
-
-If you have any questions or need help, feel free to open an issue or reach out to the maintainers.
-
-Thank you for your contributions!
+By contributing, you agree that your contributions will be licensed under the [MIT License](../LICENSE).
