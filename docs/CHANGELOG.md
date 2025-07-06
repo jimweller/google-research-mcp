@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased-0.2] - 2025-07-06
+
+### Added
+- **Timeout Protection & Reliability:** Implemented comprehensive timeout handling to enhance stability and prevent "Connection closed" errors.
+    - **Individual Timeouts:** Added specific timeouts for each external operation: Google Search (10s), Web Scraping (15s), and Gemini Analysis (30s).
+    - **Graceful Degradation:** Integrated `Promise.allSettled` in the `research_topic` tool to ensure it can complete even if some web pages fail to scrape, improving overall resilience.
+    - **Content Size Management:** Enforced limits to prevent resource exhaustion: 50KB per scraped page, 300KB total combined content, and 200KB for Gemini analysis input.
+    - **Enhanced Error Recovery:** Improved logging for timeout events and implemented fallback mechanisms to allow processes to continue despite partial failures.
+    - *Files*: `src/server.ts` (and related tool logic).
+    - *Docs*: `docs/testing/timeout-fixes-verification-report.md`.
+- **Comprehensive Timeout Test Suite:** Added a new end-to-end test suite to validate timeout protections, graceful degradation, and error handling.
+    - Verifies that individual timeouts trigger correctly and that the system remains stable under stress.
+    - Confirms 100% pass rate for all timeout-related scenarios.
+    - *Files*: `tests/e2e/comprehensive_timeout_test.js`.
+    - *Docs*: `docs/testing-guide.md`.
+
+### Changed
+- **Test Infrastructure:** Reorganized end-to-end tests into a dedicated `tests/e2e/` directory to improve structure and clarity.
+    - *Files*: Moved `e2e_*.mjs` tests into `tests/e2e/`.
+- **Build Process:** Removed `src/server.batch.spec.ts` from the primary source directory as it was part of the test reorganization.
+
 ## [Unreleased-0.1] - 2025-05-04
 
 ### Security

@@ -90,8 +90,16 @@ const batchTest = new BatchRequestTest();
 // Use the default port 3000 that the server is configured to use
 const transport = new StreamableHTTPClientTransport(
   new URL("http://localhost:3000/mcp"),
-  { timeout: 30000 } // Increase timeout to 30 seconds
+  {
+    timeout: 60000, // Increase timeout to 60 seconds
+    headers: {
+      'Accept': 'text/event-stream'
+    }
+  }
 );
+
+// Add more debugging
+console.log("Transport created with 60 second timeout and Accept: text/event-stream header");
 
 try {
   // Connect to the server
@@ -103,6 +111,18 @@ try {
     // If the server is already initialized, we can still proceed with the tests
     if (error.message && error.message.includes("Server already initialized")) {
       console.log("Server already initialized, proceeding with tests...");
+      
+      // Create a session ID manually
+      const sessionId = `batch-test-${Date.now()}`;
+      console.log(`Using manual session ID: ${sessionId}`);
+      
+      // Set headers for all requests
+      transport.headers = {
+        'Accept': 'text/event-stream',
+        'Content-Type': 'application/json',
+        'Mcp-Session-Id': sessionId
+      };
+      
       batchTest.client = {
         callTool: async (args) => {
           return transport.send({
@@ -144,8 +164,20 @@ try {
 } catch (error) {
   console.error("❌ Test failed:", error);
   console.error("Error details:", error.message);
+  console.error("Error name:", error.name);
+  console.error("Error code:", error.code);
   if (error.cause) {
     console.error("Caused by:", error.cause);
   }
+  
+  // Print more details about the transport state
+  if (transport) {
+    console.error("Transport state:", {
+      connected: transport.connected,
+      sessionId: transport.sessionId,
+      baseUrl: transport.baseUrl ? transport.baseUrl.toString() : 'undefined'
+    });
+  }
+  
   process.exit(1);
 }

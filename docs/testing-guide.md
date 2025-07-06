@@ -27,33 +27,38 @@ Additional setup files:
 
 ### Test Directory Structure
 
-Tests are organized alongside the source code they test:
+Tests are organized into two primary locations: unit/integration tests alongside the source code they validate, and end-to-end tests in a dedicated `tests/` directory.
+
+#### Unit & Integration Tests (`src/`)
+
+These tests are co-located with the source code to ensure they are tightly coupled with the component they are testing.
 
 ```
-project-root/
-├── e2e_stdio_mcp_client_test.mjs    # End-to-end test for STDIO transport
-├── e2e_sse_mcp_client_test.mjs      # End-to-end test for SSE transport
-├── src/
-│   ├── cache/
-│   │   ├── cache.ts                 # Cache implementation
-│   │   ├── cache.spec.ts            # Unit tests for Cache class
-│   │   ├── persistenceManager.ts    # Persistence manager implementation
-│   │   ├── persistenceManager.spec.ts # Integration tests for PersistenceManager
-│   │   ├── persistentCache.ts       # Persistent cache implementation
-│   │   ├── persistentCache.spec.ts  # Integration tests for PersistentCache
-│   │   ├── persistenceStrategies.ts # Persistence strategies implementation
-│   │   ├── persistenceStrategies.spec.ts # Unit tests for persistence strategies
-│   ├── shared/
-│   │   ├── persistentEventStore.ts  # Event store implementation
-│   │   ├── persistentEventStore.spec.ts  # Unit tests for event store
-│   │   ├── eventPersistenceManager.ts # Event persistence implementation
-│   │   ├── eventPersistenceManager.spec.ts # Integration tests for event persistence
+src/
+├── cache/
+│   ├── cache.ts
+│   └── cache.spec.ts            # Unit tests for Cache class
+├── shared/
+│   ├── persistentEventStore.ts
+│   └── persistentEventStore.spec.ts  # Unit tests for event store
+```
+
+#### End-to-End Tests (`tests/e2e/`)
+
+All end-to-end tests are located in the `tests/e2e/` directory. This provides a clear separation between component-level tests and system-level validation.
+
+```
+tests/
+└── e2e/
+    ├── comprehensive_timeout_test.js    # E2E test for timeout handling and reliability
+    ├── e2e_stdio_mcp_client_test.mjs    # E2E test for STDIO transport
+    └── e2e_sse_mcp_client_test.mjs      # E2E test for SSE transport
 ```
 
 ### Test File Naming Conventions
 
-- Unit and integration tests: `*.spec.ts` in the same directory as the module being tested
-- End-to-end tests: `e2e_*_mcp_client_test.mjs` at the project root
+- **Unit/Integration Tests**: `*.spec.ts`, located in the same directory as the module being tested.
+- **End-to-End Tests**: `*.{js,mjs}`, located in the `tests/e2e/` directory.
 
 ## Types of Tests
 
@@ -116,33 +121,27 @@ These tests verify:
 
 End-to-end tests verify the complete system functionality from client connection to tool execution. **Note:** These tests interact with external services and may require specific environment variables (like API keys) to be configured. Refer to `.env.example` for required variables.
 
-#### STDIO Client Test (`e2e_stdio_mcp_client_test.mjs`)
+#### STDIO Client Test (`tests/e2e/e2e_stdio_mcp_client_test.mjs`)
 
-Tests the MCP server with a direct process STDIO connection:
-- Environment variable validation
-- Client connection
-- Tool discovery
-- Tool execution for all available tools:
-  - `google_search`
-  - `scrape_page`
-  - `analyze_with_gemini`
-  - `research_topic`
-- YouTube transcript handling
-- Content analysis
+Tests the MCP server with a direct process STDIO connection, covering:
+- Client connection and tool discovery.
+- Execution of all primary tools (`google_search`, `scrape_page`, `analyze_with_gemini`, `research_topic`).
+- Core functionality like YouTube transcript handling.
 
-#### SSE Client Test (`e2e_sse_mcp_client_test.mjs`)
+#### SSE Client Test (`tests/e2e/e2e_sse_mcp_client_test.mjs`)
 
-Tests the MCP server with an HTTP+SSE connection:
-- Environment variable validation
-- Client connection over HTTP+SSE
-- Tool discovery
-- Tool execution for all available tools:
-  - `google_search`
-  - `scrape_page`
-  - `analyze_with_gemini`
-  - `research_topic`
-- YouTube transcript handling
-- Content analysis
+Tests the MCP server with an HTTP+SSE connection, validating the same functionality as the STDIO test but over the network transport.
+
+#### Comprehensive Timeout Test Suite (`tests/e2e/comprehensive_timeout_test.js`)
+
+This is a critical test suite focused on verifying the server's reliability and resilience, specifically addressing the timeout fixes. It validates:
+- **Individual Timeouts:** Ensures that timeouts for Google Search, web scraping, and Gemini analysis trigger correctly.
+- **Graceful Degradation:** Uses `Promise.allSettled` to confirm that the `research_topic` tool can complete successfully even if some operations fail.
+- **Content Size Limits:** Verifies that the server correctly handles and truncates large content to prevent resource exhaustion.
+- **Error Recovery:** Checks for clear error logging and proper fallback mechanisms.
+- **Stress Testing:** Includes tests for concurrent operations and problematic (e.g., slow) URLs to ensure the system remains stable.
+
+For a detailed summary of the results and fixes verified by this suite, see the **[Timeout Fixes Verification Report](./testing/timeout-fixes-verification-report.md)**.
 
 ## Running Tests
 
@@ -173,7 +172,7 @@ This command runs tests with detailed output, including console logs for passing
 ### Running End-to-End Tests
 
 ```bash
-# Run both STDIO and SSE end-to-end tests
+# Run all end-to-end tests in the tests/e2e/ directory
 npm run test:e2e
 
 # Run only the STDIO end-to-end test
@@ -181,9 +180,12 @@ npm run test:e2e:stdio
 
 # Run only the SSE end-to-end test
 npm run test:e2e:sse
+
+# Run the comprehensive timeout test suite
+npm run test:e2e:timeout
 ```
 
-These commands run the end-to-end tests to verify the server's functionality with different transport methods.
+These commands execute the various end-to-end test suites to validate the server's functionality, reliability, and transport methods.
 
 ### Running Specific Tests
 

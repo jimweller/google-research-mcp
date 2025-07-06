@@ -49,6 +49,7 @@ npm run dev
   - `research_topic`: Combine search, scraping, and analysis in one operation
 
 - **Performance & Reliability**
+  - **Timeout Reliability:** Comprehensive timeout protection (for search, scraping, and analysis) and graceful degradation to prevent connection issues and ensure robust performance.
   - Persistent caching system (memory + disk)
   - Session resumption for web clients
   - Multiple transport options (STDIO, HTTP+SSE)
@@ -253,19 +254,23 @@ The project uses a focused testing approach that combines end-to-end validation 
 
 | Script | Description |
 |--------|-------------|
-| `npm test` | Runs Jest tests for internal components |
-| `npm run test:e2e` | Runs both STDIO and SSE end-to-end tests |
-| `npm run test:e2e:stdio` | Runs only the STDIO end-to-end test |
-| `npm run test:e2e:sse` | Runs only the SSE end-to-end test |
-| `npm run test:coverage` | Generates detailed coverage reports |
+| Script | Description |
+|--------|-------------|
+| `npm test` | Runs Jest tests for internal components (`*.spec.ts`). |
+| `npm run test:e2e` | Runs all end-to-end tests from the `tests/e2e/` directory. |
+| `npm run test:e2e:stdio` | Runs the STDIO end-to-end test (`e2e_stdio_mcp_client_test.mjs`). |
+| `npm run test:e2e:sse` | Runs the SSE end-to-end test (`e2e_sse_mcp_client_test.mjs`). |
+| `npm run test:e2e:timeout` | Runs the comprehensive timeout test suite (`comprehensive_timeout_test.js`). |
+| `npm run test:coverage` | Generates detailed coverage reports for Jest tests. |
 
 ### Testing Approach
 
 Our testing strategy has two main components:
 
-1. **End-to-End Tests**: Validate the server's overall functionality through its MCP interface:
-   - `e2e_stdio_mcp_client_test.mjs`: Tests the server using STDIO transport
-   - `e2e_sse_mcp_client_test.mjs`: Tests the server using HTTP+SSE transport
+1. **End-to-End Tests**: Validate the server's overall functionality through its MCP interface. All E2E tests are located in the `tests/e2e/` directory.
+   - `e2e_stdio_mcp_client_test.mjs`: Tests the server using STDIO transport.
+   - `e2e_sse_mcp_client_test.mjs`: Tests the server using HTTP+SSE transport.
+   - `comprehensive_timeout_test.js`: A dedicated suite to verify timeout handling, graceful degradation, and system reliability under stress.
 
 2. **Focused Component Tests**: Jest tests for the stateful logic unique to this server:
    - **Cache System**: Unit and integration tests for the in-memory cache, persistence manager, and persistence strategies
