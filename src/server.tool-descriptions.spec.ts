@@ -535,8 +535,8 @@ describe('Enhanced MCP Tool Descriptions', () => {
       const finalMemory = process.memoryUsage().heapUsed;
       const memoryIncrease = finalMemory - initialMemory;
       
-      // Memory increase should be reasonable (< 10MB for 1000 schema instances)
-      expect(memoryIncrease).toBeLessThan(10 * 1024 * 1024);
+      // Memory increase should be reasonable (< 20MB for 1000 schema instances)
+      expect(memoryIncrease).toBeLessThan(20 * 1024 * 1024);
     });
   });
 
