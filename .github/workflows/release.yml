@@ -32,10 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
         
-      - name: Run comprehensive tests
-        run: |
-          npm run test:coverage
-          npm run test:e2e
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+        
+      - name: Run E2E tests
+        run: npm run test:e2e
         env:
           GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
           GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
