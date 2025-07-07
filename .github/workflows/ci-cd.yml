@@ -1,0 +1,106 @@
+name: Build, Test, and Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Cache TypeScript build
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist/
+            **/*.tsbuildinfo
+          key: ${{ runner.os }}-build-${{ hashFiles('src/**/*.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Setup E2E test environment
+        run: |
+          echo "Setting up E2E test environment variables..."
+        env:
+          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
+          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
+          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
+          NODE_ENV: test
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
+          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
+          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
+          NODE_ENV: test
+
+      - name: Run timeout tests
+        run: npm run test:e2e:timeout
+        continue-on-error: true
+        env:
+          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
+          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
+          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
+          NODE_ENV: test
+
+      - name: Create distribution package
+        run: |
+          # Create a clean package directory
+          mkdir -p package-dist
+          
+          # Copy essential files
+          cp -r dist/ package-dist/
+          cp package.json package-dist/
+          cp package-lock.json package-dist/
+          cp README.md package-dist/
+          cp LICENSE package-dist/
+          
+          # Create a production-ready package.json
+          cd package-dist
+          npm ci --production --silent
+          
+          # Create tarball
+          cd ..
+          tar -czf google-researcher-mcp-dist.tar.gz -C package-dist .
+
+      - name: Upload distribution package
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-researcher-mcp-dist
+          path: google-researcher-mcp-dist.tar.gz
+          retention-days: 90
+
+      - name: Cleanup processes
+        if: always()
+        run: |
+          # Kill any remaining server processes
+          pkill -f "dist/server.js" || true
+          pkill -f "node.*server" || true
+          
+          # Clean up test ports
+          lsof -ti tcp:3000 | xargs kill -9 2>/dev/null || true
+          
+          # Clean up test storage
+          rm -rf storage/test/ || true
