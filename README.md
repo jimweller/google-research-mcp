@@ -68,12 +68,12 @@ The server is built on a layered architecture designed for clarity, separation o
 ```mermaid
 graph TD
     subgraph "Client"
-        A[MCP Client (CLI/Web)]
+        A[MCP Client]
     end
 
     subgraph "Transport Layer"
         B[STDIO]
-        C[HTTP/SSE]
+        C[HTTP-SSE]
     end
 
     subgraph "Core Logic"

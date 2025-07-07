@@ -46,12 +46,12 @@ The server employs a layered architecture that clearly defines the flow of data 
 ```mermaid
 graph TD
     subgraph "Clients"
-        A[MCP Client (CLI/Web/IDE)]
+        A[MCP Client]
     end
 
     subgraph "Transport & Security"
         B[STDIO Transport]
-        C[HTTP/SSE Transport]
+        C[HTTP-SSE Transport]
         L[OAuth 2.1 Middleware]
     end
 
@@ -71,7 +71,7 @@ graph TD
 
     subgraph "External Services"
         M[Google Search API]
-        N[Web Pages / YouTube]
+        N[Web Pages or YouTube]
         O[Google Gemini API]
     end
 
