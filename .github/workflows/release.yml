@@ -9,6 +9,7 @@ env:
   REGISTRY_URL: 'https://registry.npmjs.org'
 
 permissions:
+  attestations: write
   contents: read
   id-token: write
 
