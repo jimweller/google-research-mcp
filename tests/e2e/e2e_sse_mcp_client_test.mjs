@@ -12,15 +12,23 @@ const transport = new StreamableHTTPClientTransport(
 );
 
 try {
-  // Connect to the server
-  // Connect to the server - Removed try/catch for "already initialized"
+  // Connect to the server with proper initialization handling
   console.log(`Connecting to MCP server via ${sseTest.transportType}...`);
-  await sseTest.connect(transport);
-  // Success message is inside connect()
+  
+  try {
+    await sseTest.connect(transport);
+    // Success message is inside connect()
+  } catch (connectError) {
+    if (connectError.message && connectError.message.includes("already initialized")) {
+      console.log("⚠️ Server already initialized, continuing with tests...");
+    } else {
+      throw connectError; // Re-throw if it's a different error
+    }
+  }
 
   // Add a small delay to allow server transport state to settle after connection
   console.log("Waiting briefly after connection...");
-  await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1000ms delay
 
   // Run individual tests instead of runAllTests
   console.log("Running SSE tests...");

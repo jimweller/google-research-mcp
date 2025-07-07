@@ -70,7 +70,8 @@ E2E tests are plain JavaScript/TypeScript files that use the MCP SDK to interact
 
 -   `e2e_stdio_mcp_client_test.mjs`: Tests the server over the **STDIO transport**.
 -   `e2e_sse_mcp_client_test.mjs`: Tests the server over the **HTTP/SSE transport**.
--   `comprehensive_timeout_test.js`: A crucial suite that verifies the server's **reliability features**, including API timeouts, graceful degradation of the `research_topic` tool, and content size limiting. For a detailed report on what this test verifies, see the [**Timeout Fixes Verification Report**](./timeout-fixes-verification-report.md).
+-   `comprehensive_timeout_test.js`: A crucial suite that verifies the server's **reliability features**, including API timeouts, graceful degradation of the `research_topic` tool, and content size limiting. For a detailed report on what this test verifies, see the [**Timeout Fixes Verification Report**](./testing/timeout-fixes-verification-report.md).
+-   `server.tool-descriptions.spec.ts` & `server.enhanced-descriptions.spec.ts`: Component tests that validate the implementation of the enhanced tool descriptions. See the [**Enhanced Tool Descriptions Test Report**](./testing/enhanced-tool-descriptions-test-report.md) for full details.
 
 ## Running Tests
 

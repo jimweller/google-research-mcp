@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-07-06
+
 ### Added
+- **Enhanced Tool Descriptions:** Implemented a comprehensive metadata system for all tools to improve discoverability and usability for LLMs, developers, and users. This includes:
+  - **Detailed Descriptions:** Each tool now has a multi-line description explaining its purpose, best practices, and use cases.
+  - **Parameter Documentation:** Every tool parameter is documented with its type, description, constraints, and usage examples.
+  - **Rich Annotations:** Tools are now annotated with a human-readable title, category (`search`, `extraction`, `analysis`, `composite`), complexity, and workflow guidance.
+  - **Self-Documenting Code:** The rich metadata serves as living documentation, ensuring that tool information is always up-to-date.
+
+### Changed
+- **README.md:** Updated the "Available Tools" section with a new, detailed table generated from the enhanced tool metadata, providing a clear and comprehensive overview of the server's capabilities.
+
+### Documentation
 - Comprehensive documentation review and enhancement for public release readiness.
 
 ## [1.0.0] - 2025-07-06

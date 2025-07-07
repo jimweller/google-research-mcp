@@ -177,10 +177,16 @@ export class MCPEndToEndTest {
    * Clean up resources before exiting
    */
   async cleanup() {
+    console.log(`🧹 Starting cleanup for ${this.transportType} transport...`);
+    
     let closedGracefully = false;
     if (this.transport && typeof this.transport.close === 'function') {
       try {
-        await this.transport.close();
+        console.log("Closing transport...");
+        await Promise.race([
+          this.transport.close(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Transport close timeout')), 5000))
+        ]);
         console.log("✅ Transport closed gracefully.");
         closedGracefully = true;
       } catch (closeError) {
@@ -188,6 +194,25 @@ export class MCPEndToEndTest {
       }
     } else {
       console.log("⚠️ No close method found on transport or transport not set.");
+    }
+
+    // Handle SSE transport cleanup
+    if (this.transportType === 'SSE' && this.transport) {
+      try {
+        console.log("Performing SSE-specific cleanup...");
+        // Force close any remaining connections
+        if (this.transport.eventSource && this.transport.eventSource.close) {
+          this.transport.eventSource.close();
+          console.log("✅ SSE EventSource closed.");
+        }
+        // Cleanup any pending requests
+        if (this.transport.abortController) {
+          this.transport.abortController.abort();
+          console.log("✅ SSE requests aborted.");
+        }
+      } catch (sseError) {
+        console.warn("⚠️ Error during SSE cleanup:", sseError.message);
+      }
     }
 
     // Force kill stdio child process if it exists and wasn't closed gracefully
@@ -217,6 +242,8 @@ export class MCPEndToEndTest {
     }
 
     // Allow any remaining operations or process termination to complete
-    await new Promise(resolve => setTimeout(resolve, 200)); // Slightly longer delay
+    console.log("Allowing final cleanup to settle...");
+    await new Promise(resolve => setTimeout(resolve, 500));
+    console.log("✅ Cleanup completed.");
   }
 }

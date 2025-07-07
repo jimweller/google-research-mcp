@@ -371,26 +371,49 @@ function configureToolsAndResources(
 
     // 2) Register each tool with the MCP server
     /**
-     * Tool Registration
+     * Enhanced Tool Registration System
      *
-     * Each tool is registered with:
-     * - A unique name
-     * - An input schema (using Zod for validation)
-     * - An async handler function that processes requests
+     * All tools are now registered with comprehensive MCP-compliant metadata:
      *
-     * The schema defines required and optional parameters for each tool.
+     * 1. **Detailed Descriptions**: Each parameter includes comprehensive descriptions
+     *    with usage examples, constraints, and optimization guidance
+     *
+     * 2. **Enhanced Annotations**: Improved titles with clear purpose statements,
+     *    proper readOnlyHint and openWorldHint values for LLM guidance
+     *
+     * 3. **Parameter Documentation**: Zod schemas enhanced with .describe() calls
+     *    providing specific examples, constraints, and best practices
+     *
+     * 4. **LLM-Friendly Format**: Descriptions written specifically for LLM
+     *    interpretation with clear use cases and workflow guidance
+     *
+     * This enhancement dramatically improves tool discoverability and reduces
+     * parameter usage errors by providing comprehensive context to LLMs.
      */
     server.tool(
         "google_search",
-        { query: z.string(), num_results: z.number().default(5) },
-        { title: "Performs a Google search and returns relevant web pages", readOnlyHint: true },
+        {
+            query: z.string().describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
+            num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage.")
+        },
+        {
+            title: "Google Web Search - Find relevant web pages and resources",
+            readOnlyHint: true,
+            openWorldHint: true
+        },
         async ({ query, num_results = 5 }) => ({ content: await googleSearchFn({ query, num_results }) })
     );
 
     server.tool(
         "scrape_page",
-        { url: z.string().url() },
-        { title: "Scrapes content from a web page or extracts YouTube transcripts", readOnlyHint: true },
+        {
+            url: z.string().url().describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
+        },
+        {
+            title: "Web Page & YouTube Content Extractor - Extract text content and transcripts",
+            readOnlyHint: true,
+            openWorldHint: true
+        },
         async ({ url }) => {
             const result = await scrapePageFn({ url });
 
@@ -405,35 +428,44 @@ function configureToolsAndResources(
     server.tool(
         "analyze_with_gemini",
         {
-            text: z.string(),
-            model: z.string().default("gemini-2.0-flash-001"),
+            text: z.string().describe("The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results."),
+            model: z.string().default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. Available options: 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support). Use gemini-2.0-flash-001 for speed, gemini-pro for detailed analysis."),
         },
-        { title: "Analyzes text content using Google's Gemini AI models", readOnlyHint: true },
+        {
+            title: "Gemini AI Text Analysis - Process and analyze content with advanced AI",
+            readOnlyHint: true,
+            openWorldHint: false
+        },
         async ({ text, model = "gemini-2.0-flash-001" }) => ({ content: await analyzeWithGeminiFn({ text, model }) })
     );
 
     // 3) Create composite tools by chaining operations
     /**
-     * Research Topic Tool - A resilient composite tool with timeout protection
+     * Research Topic Tool - A comprehensive research workflow with enhanced descriptions
      *
-     * This tool demonstrates how to compose multiple tools into a single operation:
-     * 1. Search for information on a topic (with timeout)
-     * 2. Scrape content from each search result (with graceful degradation)
-     * 3. Combine the successfully scraped content
-     * 4. Analyze the combined content with Gemini (with size limits)
+     * This advanced composite tool implements a sophisticated research pipeline that:
+     * 1. Searches for information using Google Search (with timeout protection)
+     * 2. Scrapes content from discovered URLs (with graceful degradation)
+     * 3. Combines and manages content size intelligently
+     * 4. Analyzes the synthesized content with Gemini AI
      *
      * Features:
-     * - Uses Promise.allSettled for graceful degradation
-     * - Individual operation timeouts
-     * - Content size management
-     * - Detailed error reporting
+     * - Resilient architecture with graceful degradation
+     * - Promise.allSettled for parallel processing with failure tolerance
+     * - Intelligent content size management and truncation
+     * - Comprehensive error reporting and success metrics
+     * - Individual operation timeouts for reliability
      */
     server.tool(
         "research_topic",
-        { query: z.string(), num_results: z.number().default(3) },
         {
-            title: "A resilient composite tool that chains search, scrape, and analysis operations to research a topic",
-            readOnlyHint: true
+            query: z.string().describe("The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results. Frame as a research question or specific topic for comprehensive analysis. Examples: 'artificial intelligence trends 2024', 'sustainable energy solutions for small businesses', 'TypeScript performance optimization techniques'."),
+            num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze. More sources provide broader coverage but take longer to process. Recommended range: 2-5 sources for optimal balance of speed and coverage. Use 2-3 for quick research, 4-5 for comprehensive analysis.")
+        },
+        {
+            title: "Comprehensive Topic Research Workflow - Advanced multi-step research with AI synthesis",
+            readOnlyHint: true,
+            openWorldHint: true
         },
         async ({ query, num_results }) => {
             const startTime = Date.now();

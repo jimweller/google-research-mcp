@@ -171,12 +171,14 @@ Upon successful startup, you will see confirmation that the transports are ready
 
 ### Available Tools
 
-| Tool                  | Description                                       | Parameters                                                    |
-| --------------------- | ------------------------------------------------- | ------------------------------------------------------------- |
-| `google_search`       | Searches the web using Google Search API.         | `query` (string), `num_results` (number, default: 5)          |
-| `scrape_page`         | Extracts text content from a given URL.           | `url` (string)                                                |
-| `analyze_with_gemini` | Processes text with a specified Gemini model.     | `text` (string), `model` (string, default: "gemini-pro")      |
-| `research_topic`      | A workflow that searches, scrapes, and analyzes.  | `query` (string), `num_results` (number, default: 3)          |
+The server provides a suite of powerful tools for research and analysis. Each tool is designed with detailed descriptions and annotations to be easily understood and utilized by AI models.
+
+| Tool | Title | Description & Parameters |
+| :--- | :--- | :--- |
+| **`google_search`** | **Google Web Search** | **Description:** Searches the web using the Google Custom Search API to find relevant web pages and resources. Ideal for finding current information, discovering authoritative sources, and locating specific documents. Results are cached for 30 minutes.<br><br>**Parameters:**<br> - `query` (string, required): The search query. Use specific, targeted keywords for best results.<br> - `num_results` (number, optional, default: 5): The number of search results to return (1-10). |
+| **`scrape_page`** | **Web Page & YouTube Content Extractor** | **Description:** Extracts text content from web pages and YouTube videos. It intelligently filters out noise and can automatically retrieve video transcripts. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL of the web page or YouTube video to scrape. |
+| **`analyze_with_gemini`** | **Gemini AI Text Analysis** | **Description:** Processes and analyzes text content using Google's Gemini AI models. It can summarize, answer questions, and generate insights from provided text. Large texts are automatically truncated. Results are cached for 15 minutes.<br><br>**Parameters:**<br> - `text` (string, required): The text content to analyze.<br> - `model` (string, optional, default: "gemini-2.0-flash-001"): The Gemini model to use (e.g., `gemini-2.0-flash-001`, `gemini-pro`). |
+| **`research_topic`** | **Comprehensive Topic Research Workflow** | **Description:** A powerful composite tool that automates the entire research process: it searches for a topic, scrapes the content from multiple sources, and synthesizes the findings with Gemini AI. It's designed for resilience and provides comprehensive analysis.<br><br>**Parameters:**<br> - `query` (string, required): The research topic or question.<br> - `num_results` (number, optional, default: 3): The number of sources to research (recommended: 2-5). |
 
 ### Client Integration
 
