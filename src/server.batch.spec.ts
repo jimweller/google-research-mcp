@@ -45,6 +45,14 @@ describe('JSON-RPC Batch Request Handling (Server-Side Checks)', () => {
   const testEventPath = path.join(testStorageDir, 'events');
 
   beforeAll(async () => { // Make beforeAll async
+    // Use real timers for this test suite to avoid hanging
+    jest.useRealTimers();
+    
+    // Setup test environment variables to prevent process.exit(1) in createAppAndHttpTransport
+    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'test-api-key';
+    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'test-search-id';
+    process.env.GOOGLE_GEMINI_API_KEY = 'test-gemini-key';
+
     // Ensure test storage directory exists
     await fs.mkdir(testStorageDir, { recursive: true });
 
@@ -76,6 +84,14 @@ describe('JSON-RPC Batch Request Handling (Server-Side Checks)', () => {
     }
     // Clean up test storage directory
     await fs.rm(testStorageDir, { recursive: true, force: true });
+    
+    // Clear environment variables to avoid affecting other tests
+    delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
+    delete process.env.GOOGLE_CUSTOM_SEARCH_ID;
+    delete process.env.GOOGLE_GEMINI_API_KEY;
+    
+    // Restore fake timers for other tests
+    jest.useFakeTimers();
   });
 
   it('should handle empty batch requests with a 400 error', async () => {
