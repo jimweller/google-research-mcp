@@ -11,6 +11,10 @@ env:
   NODE_VERSION: '18'
   REGISTRY_URL: 'https://registry.npmjs.org'
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish-prerelease:
     name: Publish Pre-release
