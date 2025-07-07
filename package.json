@@ -27,7 +27,25 @@
     "llm"
   ],
   "type": "module",
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE",
+    "docs/**/*.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
+    "prepublishOnly": "npm run build && npm test",
+    "prepack": "npm run build",
     "test:e2e": "npm run build && npm run test:e2e:stdio && npm run test:e2e:sse",
     "test:e2e:stdio": "node tests/e2e/e2e_stdio_mcp_client_test.mjs",
     "test:e2e:sse": "./scripts/run-sse-test.sh",

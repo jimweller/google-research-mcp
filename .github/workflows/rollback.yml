@@ -1,0 +1,130 @@
+name: Emergency Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_to_rollback:
+        description: 'Version to rollback to (e.g., 1.2.3)'
+        required: true
+        type: string
+      rollback_reason:
+        description: 'Reason for rollback'
+        required: true
+        type: string
+      deprecate_versions:
+        description: 'Comma-separated list of versions to deprecate (e.g., 1.2.4,1.2.5)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '18'
+  REGISTRY_URL: 'https://registry.npmjs.org'
+
+jobs:
+  rollback:
+    name: Rollback Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: ${{ env.REGISTRY_URL }}
+          
+      - name: Validate rollback version
+        run: |
+          ROLLBACK_VERSION="${{ github.event.inputs.version_to_rollback }}"
+          
+          # Check if version exists
+          if ! npm view google-researcher-mcp@$ROLLBACK_VERSION version; then
+            echo "❌ Version $ROLLBACK_VERSION not found on npm"
+            exit 1
+          fi
+          
+          echo "✅ Version $ROLLBACK_VERSION found and valid for rollback"
+          
+      - name: Deprecate problematic versions
+        if: github.event.inputs.deprecate_versions != ''
+        run: |
+          IFS=',' read -ra VERSIONS <<< "${{ github.event.inputs.deprecate_versions }}"
+          for version in "${VERSIONS[@]}"; do
+            echo "Deprecating version: $version"
+            npm deprecate google-researcher-mcp@$version "${{ github.event.inputs.rollback_reason }}" || echo "Failed to deprecate $version (may not exist)"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Restore previous version as latest
+        run: |
+          ROLLBACK_VERSION="${{ github.event.inputs.version_to_rollback }}"
+          echo "Setting google-researcher-mcp@$ROLLBACK_VERSION as latest"
+          npm dist-tag add google-researcher-mcp@$ROLLBACK_VERSION latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Verify rollback
+        run: |
+          CURRENT_LATEST=$(npm view google-researcher-mcp@latest version)
+          EXPECTED_VERSION="${{ github.event.inputs.version_to_rollback }}"
+          
+          if [[ "$CURRENT_LATEST" == "$EXPECTED_VERSION" ]]; then
+            echo "✅ Rollback successful: latest is now $CURRENT_LATEST"
+          else
+            echo "❌ Rollback failed: latest is $CURRENT_LATEST, expected $EXPECTED_VERSION"
+            exit 1
+          fi
+          
+      - name: Create rollback issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 Emergency Rollback: v${{ github.event.inputs.version_to_rollback }}`;
+            const body = `## Rollback Details
+            
+            - **Rolled back to**: v${{ github.event.inputs.version_to_rollback }}
+            - **Reason**: ${{ github.event.inputs.rollback_reason }}
+            - **Deprecated versions**: ${{ github.event.inputs.deprecate_versions || 'None' }}
+            - **Triggered by**: @${{ github.actor }}
+            - **Time**: ${new Date().toISOString()}
+            
+            ## Verification
+            - [x] Rollback version exists on npm
+            - [x] Latest tag updated to rollback version
+            - [x] Problematic versions deprecated (if specified)
+            
+            ## Next Steps
+            - [ ] Investigate root cause
+            - [ ] Prepare hotfix if needed
+            - [ ] Plan next release
+            - [ ] Update documentation
+            - [ ] Notify users via appropriate channels
+            
+            ## Installation Command
+            Users can now install the stable version with:
+            \`\`\`bash
+            npm install google-researcher-mcp@latest
+            \`\`\`
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['critical', 'rollback', 'incident']
+            });
+            
+      - name: Create deployment summary
+        run: |
+          echo "## 🚨 Emergency Rollback Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rolled back to**: \`v${{ github.event.inputs.version_to_rollback }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason**: ${{ github.event.inputs.rollback_reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current latest**: \`$(npm view google-researcher-mcp@latest version)\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Install command**: \`npm install google-researcher-mcp@latest\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ -n "${{ github.event.inputs.deprecate_versions }}" ]]; then
+            echo "- **Deprecated versions**: ${{ github.event.inputs.deprecate_versions }}" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,171 @@
+name: Monitor Package Health
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  check-npm-sync:
+    name: Check npm Package Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          
+      - name: Check package versions
+        id: versions
+        run: |
+          # Get latest npm version
+          NPM_VERSION=$(npm view google-researcher-mcp version 2>/dev/null || echo "not-found")
+          echo "npm_version=${NPM_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Get latest GitHub release version
+          GITHUB_VERSION=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name | sed 's/v//' 2>/dev/null || echo "not-found")
+          echo "github_version=${GITHUB_VERSION}" >> $GITHUB_OUTPUT
+          
+          echo "📊 Version Check:"
+          echo "- npm latest: ${NPM_VERSION}"
+          echo "- GitHub latest: ${GITHUB_VERSION}"
+          
+      - name: Test package installation
+        run: |
+          echo "🧪 Testing package installation..."
+          mkdir -p test-install
+          cd test-install
+          
+          # Test latest version installation
+          npm init -y --silent
+          
+          if npm install google-researcher-mcp --silent; then
+            echo "✅ Latest version installs successfully"
+            
+            # Test basic functionality
+            if node -e "
+              try {
+                const pkg = require('google-researcher-mcp/package.json');
+                console.log('✅ Package metadata accessible');
+                console.log('- Name:', pkg.name);
+                console.log('- Version:', pkg.version);
+                console.log('- Main:', pkg.main);
+              } catch (e) {
+                console.error('❌ Package metadata check failed:', e.message);
+                process.exit(1);
+              }
+            "; then
+              echo "✅ Package structure validation passed"
+            else
+              echo "❌ Package structure validation failed"
+              exit 1
+            fi
+          else
+            echo "❌ Package installation failed"
+            exit 1
+          fi
+          
+      - name: Check package size
+        run: |
+          echo "📦 Checking package size..."
+          
+          # Get package info
+          PACKAGE_INFO=$(npm view google-researcher-mcp --json 2>/dev/null || echo "{}")
+          
+          if [[ "$PACKAGE_INFO" != "{}" ]]; then
+            UNPACKED_SIZE=$(echo "$PACKAGE_INFO" | jq -r '.dist.unpackedSize // 0')
+            TARBALL_SIZE=$(echo "$PACKAGE_INFO" | jq -r '.dist.tarball // "unknown"' | xargs curl -sI | grep -i content-length | awk '{print $2}' | tr -d '\r' || echo "0")
+            
+            echo "- Unpacked size: $(numfmt --to=iec $UNPACKED_SIZE 2>/dev/null || echo $UNPACKED_SIZE) bytes"
+            echo "- Download size: $(numfmt --to=iec $TARBALL_SIZE 2>/dev/null || echo $TARBALL_SIZE) bytes"
+            
+            # Check if package is too large (50MB limit)
+            if [[ $UNPACKED_SIZE -gt 52428800 ]]; then
+              echo "⚠️ Package size exceeds 50MB limit"
+            else
+              echo "✅ Package size within acceptable limits"
+            fi
+          fi
+          
+      - name: Check dependencies health
+        run: |
+          echo "🔍 Checking dependencies health..."
+          
+          # Check for security vulnerabilities
+          if npm audit --audit-level=high --json > audit.json 2>/dev/null; then
+            VULNERABILITIES=$(cat audit.json | jq '.metadata.vulnerabilities.total // 0')
+            HIGH_VULNS=$(cat audit.json | jq '.metadata.vulnerabilities.high // 0')
+            CRITICAL_VULNS=$(cat audit.json | jq '.metadata.vulnerabilities.critical // 0')
+            
+            echo "- Total vulnerabilities: $VULNERABILITIES"  
+            echo "- High severity: $HIGH_VULNS"
+            echo "- Critical severity: $CRITICAL_VULNS"
+            
+            if [[ $CRITICAL_VULNS -gt 0 ]] || [[ $HIGH_VULNS -gt 0 ]]; then
+              echo "❌ High/Critical vulnerabilities found"
+              cat audit.json | jq '.vulnerabilities // {}'
+              exit 1
+            else
+              echo "✅ No high/critical vulnerabilities found"
+            fi
+          else
+            echo "⚠️ Could not run security audit"
+          fi
+          
+      - name: Create health report
+        if: always()
+        run: |
+          echo "## 📊 Package Health Report" >> $GITHUB_STEP_SUMMARY
+          echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📋 Version Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **npm latest**: \`${{ steps.versions.outputs.npm_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub latest**: \`${{ steps.versions.outputs.github_version }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.versions.outputs.npm_version }}" == "${{ steps.versions.outputs.github_version }}" ]]; then
+            echo "- **Status**: ✅ Versions in sync" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: ⚠️ Version mismatch detected" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [npm package](https://www.npmjs.com/package/google-researcher-mcp)" >> $GITHUB_STEP_SUMMARY
+          echo "- [GitHub releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Package stats](https://npm-stat.com/charts.html?package=google-researcher-mcp)" >> $GITHUB_STEP_SUMMARY
+          
+      - name: Report critical issues
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Package Health Check Failed',
+              body: `## Package Health Issue Detected
+              
+              The automated health check has detected issues with the published package.
+              
+              **Check Details:**
+              - **Time**: ${new Date().toISOString()}
+              - **npm Version**: ${{ steps.versions.outputs.npm_version }}
+              - **GitHub Version**: ${{ steps.versions.outputs.github_version }}
+              
+              **Possible Issues:**
+              - Package installation failure
+              - Security vulnerabilities detected
+              - Version synchronization problems
+              - Package size or structure issues
+              
+              **Action Required:**
+              Please review the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) and take appropriate action.
+              
+              **Auto-generated by**: Package Health Monitor
+              `,
+              labels: ['bug', 'monitoring', 'package-health']
+            });

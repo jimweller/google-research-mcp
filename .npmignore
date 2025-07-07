@@ -1,0 +1,59 @@
+# Source files (only publish compiled dist/)
+src/
+tsconfig.json
+jest.config.js
+jest.setup.js
+
+# Development and testing files
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+*.test.js
+*.spec.js
+
+# Build and development tools
+.github/
+scripts/
+.vscode/
+.roo/
+
+# Environment and configuration
+.env*
+.eslintrc*
+.prettierrc*
+nodemon.json
+
+# Storage and runtime files
+storage/
+*.log
+*.tmp
+*.temp
+
+# Documentation (except README and LICENSE)
+docs/
+!docs/**/*.md
+
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+
+# Package management
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup

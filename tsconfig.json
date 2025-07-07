@@ -24,10 +24,15 @@
     // 6. Put all output under dist/
     "outDir": "dist",
 
-    // 7. Tell TS to load Node.js types (Buffer, global process, etc.)
+    // 7. Generate declaration files for npm publishing
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    // 8. Tell TS to load Node.js types (Buffer, global process, etc.)
     "types": ["node", "jest"],
     
-    // 8. Required for Node16/18/Next module kind
+    // 9. Required for Node16/18/Next module kind
     "isolatedModules": true
   },
 

@@ -1,4 +1,4 @@
-name: Build, Test, and Release
+name: CI/CD Pipeline
 
 on:
   push:
@@ -6,92 +6,98 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  NODE_VERSION: '18'
+  REGISTRY_URL: 'https://registry.npmjs.org'
+
 jobs:
-  build-test-release:
+  test:
+    name: Test Suite
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
+        
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: Cache TypeScript build
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist/
-            **/*.tsbuildinfo
-          key: ${{ runner.os }}-build-${{ hashFiles('src/**/*.ts', 'tsconfig.json') }}
-          restore-keys: |
-            ${{ runner.os }}-build-
-
+          registry-url: ${{ env.REGISTRY_URL }}
+          
       - name: Install dependencies
         run: npm ci
-
-      - name: Build TypeScript
-        run: npm run build
-
+        
+      - name: Type check
+        run: npx tsc --noEmit
+        
       - name: Run unit tests
         run: npm test
-
-      - name: Setup E2E test environment
-        run: |
-          echo "Setting up E2E test environment variables..."
-        env:
-          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
-          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
-          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
-          NODE_ENV: test
-
+        
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
-          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
-          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
-          NODE_ENV: test
-
-      - name: Run timeout tests
-        run: npm run test:e2e:timeout
-        continue-on-error: true
-        env:
-          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY_TEST || 'mock-key-for-testing' }}
-          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID_TEST || 'mock-id-for-testing' }}
-          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY_TEST || 'mock-gemini-key-for-testing' }}
-          NODE_ENV: test
-
-      - name: Create distribution package
-        run: |
-          # Create a clean package directory
-          mkdir -p package-dist
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           
-          # Copy essential files
-          cp -r dist/ package-dist/
-          cp package.json package-dist/
-          cp package-lock.json package-dist/
-          cp README.md package-dist/
-          cp LICENSE package-dist/
-          
-          # Create a production-ready package.json
-          cd package-dist
-          npm ci --production --silent
-          
-          # Create tarball
-          cd ..
-          tar -czf google-researcher-mcp-dist.tar.gz -C package-dist .
-
-      - name: Upload distribution package
+      - name: Build package
+        run: npm run build
+        
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: google-researcher-mcp-dist
-          path: google-researcher-mcp-dist.tar.gz
-          retention-days: 90
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 30
 
+  publish-dev:
+    name: Publish Development Build
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          registry-url: ${{ env.REGISTRY_URL }}
+          
+      - name: Install dependencies
+        run: npm ci
+          
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          
+      - name: Generate dev version
+        id: version
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          DEV_VERSION="${BASE_VERSION}-dev.${TIMESTAMP}"
+          echo "version=${DEV_VERSION}" >> $GITHUB_OUTPUT
+          npm version $DEV_VERSION --no-git-tag-version
+          
+      - name: Publish to npm
+        run: npm publish --tag dev --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Development Build Published" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Install**: \`npm install google-researcher-mcp@dev\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          
       - name: Cleanup processes
         if: always()
         run: |
