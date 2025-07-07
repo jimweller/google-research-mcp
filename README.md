@@ -234,15 +234,15 @@ console.log(result.content[0].text);
 
 The server provides several administrative endpoints for monitoring and control. Access to these endpoints is protected by OAuth scopes.
 
-| Method | Endpoint                  | Description                               | Required Scope                        |
-| ------ | ------------------------- | ----------------------------------------- | ------------------------------------- |
-| `GET`  | `/mcp/cache-stats`        | View cache performance statistics.        | `mcp:admin:cache:read`                |
-| `GET`  | `/mcp/event-store-stats`  | View event store usage statistics.        | `mcp:admin:event-store:read`          |
-| `POST` | `/mcp/cache-invalidate`   | Clear specific cache entries.             | `mcp:admin:cache:invalidate`          |
-| `POST` | `/mcp/cache-persist`      | Force the cache to be saved to disk.      | `mcp:admin:cache:persist`             |
-| `GET`  | `/mcp/oauth-scopes`       | Get documentation for all OAuth scopes.   | Public                                |
-| `GET`  | `/mcp/oauth-config`       | View the server's OAuth configuration.    | `mcp:admin:config:read`               |
-| `GET`  | `/mcp/oauth-token-info`   | View details of the provided token.       | Requires authentication               |
+| Method | Endpoint                 | Description                             | Required Scope               |
+|--------|--------------------------|-----------------------------------------|------------------------------|
+| `GET`  | `/mcp/cache-stats`       | View cache performance statistics.      | `mcp:admin:cache:read`       |
+| `GET`  | `/mcp/event-store-stats` | View event store usage statistics.      | `mcp:admin:event-store:read` |
+| `POST` | `/mcp/cache-invalidate`  | Clear specific cache entries.           | `mcp:admin:cache:invalidate` |
+| `POST` | `/mcp/cache-persist`     | Force the cache to be saved to disk.    | `mcp:admin:cache:persist`    |
+| `GET`  | `/mcp/oauth-scopes`      | Get documentation for all OAuth scopes. | Public                       |
+| `GET`  | `/mcp/oauth-config`      | View the server's OAuth configuration.  | `mcp:admin:config:read`      |
+| `GET`  | `/mcp/oauth-token-info`  | View details of the provided token.     | Requires authentication      |
 
 ## Security
 
