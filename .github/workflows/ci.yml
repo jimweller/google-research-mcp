@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test Suite
@@ -15,6 +19,7 @@ jobs:
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
+      max-parallel: 2
 
     steps:
     - name: Checkout code
@@ -40,12 +45,14 @@ jobs:
 
     - name: Run unit tests with coverage
       run: npm run test:coverage
+      timeout-minutes: 15
       env:
         NODE_ENV: test
         CI: true
 
     - name: Run integration tests
       run: timeout 10m npm run test:integration
+      timeout-minutes: 12
       env:
         NODE_ENV: test
         CI: true
@@ -55,18 +62,21 @@ jobs:
 
     - name: Run E2E tests (stdio)
       run: timeout 5m npm run test:e2e:stdio
+      timeout-minutes: 7
       env:
         NODE_ENV: test
         CI: true
 
     - name: Run E2E tests (sse)
       run: timeout 5m npm run test:e2e:sse
+      timeout-minutes: 7
       env:
         NODE_ENV: test
         CI: true
 
     - name: Run YouTube transcript E2E tests
       run: timeout 5m npm run test:e2e:youtube
+      timeout-minutes: 7
       env:
         NODE_ENV: test
         CI: true
