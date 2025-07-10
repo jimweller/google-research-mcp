@@ -56,3 +56,16 @@ setup_roo_project.sh
 *.tmp
 *.temp
 digest.txt
+
+# Debug and test files
+debug-*.js
+test-*.js
+*-debug.js
+*-test.js
+create-prompt-cheat-sheet.js
+
+# Debug artifacts
+*-debug-*.md
+*-failure-analysis.md
+*-investigation-*.md
+debug_*.md
