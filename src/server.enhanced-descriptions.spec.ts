@@ -30,7 +30,7 @@ jest.mock('crawlee', () => ({
   }))
 }));
 
-jest.mock('youtube-transcript', () => ({
+jest.mock('@danielxceron/youtube-transcript', () => ({
   YoutubeTranscript: {
     fetchTranscript: jest.fn(() => Promise.resolve([
       { text: 'Mock transcript segment 1' },
