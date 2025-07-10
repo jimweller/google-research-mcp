@@ -10,6 +10,7 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     strategy:
       matrix:
@@ -44,7 +45,7 @@ jobs:
         CI: true
 
     - name: Run integration tests
-      run: npm run test:integration
+      run: timeout 10m npm run test:integration
       env:
         NODE_ENV: test
         CI: true
@@ -53,19 +54,19 @@ jobs:
         GOOGLE_SEARCH_ENGINE_ID: ${{ secrets.GOOGLE_SEARCH_ENGINE_ID }}
 
     - name: Run E2E tests (stdio)
-      run: npm run test:e2e:stdio
+      run: timeout 5m npm run test:e2e:stdio
       env:
         NODE_ENV: test
         CI: true
 
     - name: Run E2E tests (sse)
-      run: npm run test:e2e:sse
+      run: timeout 5m npm run test:e2e:sse
       env:
         NODE_ENV: test
         CI: true
 
     - name: Run YouTube transcript E2E tests
-      run: npm run test:e2e:youtube
+      run: timeout 5m npm run test:e2e:youtube
       env:
         NODE_ENV: test
         CI: true
@@ -138,6 +139,7 @@ jobs:
   performance:
     name: Performance Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test]
     
     steps:
@@ -162,7 +164,7 @@ jobs:
         NODE_ENV: test
 
     - name: Run timeout tests
-      run: npm run test:e2e:timeout
+      run: timeout 8m npm run test:e2e:timeout
       env:
         NODE_ENV: test
 

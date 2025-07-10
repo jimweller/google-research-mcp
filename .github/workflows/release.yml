@@ -83,22 +83,25 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const release_id = context.payload.release.id;
+            const releaseNotes = `${{ steps.release_notes.outputs.notes }}`;
+            const version = `${{ steps.version.outputs.version }}`;
+            const repository = `${{ github.repository }}`;
             
             await github.rest.repos.updateRelease({
               owner,
               repo,
               release_id,
-              body: `${{ steps.release_notes.outputs.notes }}
+              body: `${releaseNotes}
               
               ## 📦 Installation
               \`\`\`bash
-              npm install google-researcher-mcp@${{ steps.version.outputs.version }}
+              npm install google-researcher-mcp@${version}
               \`\`\`
               
               ## 🔗 Links
-              - [npm package](https://www.npmjs.com/package/google-researcher-mcp/v/${{ steps.version.outputs.version }})
-              - [Documentation](https://github.com/${{ github.repository }}#readme)
-              - [Changelog](https://github.com/${{ github.repository }}/blob/main/docs/CHANGELOG.md)
+              - [npm package](https://www.npmjs.com/package/google-researcher-mcp/v/${version})
+              - [Documentation](https://github.com/${repository}#readme)
+              - [Changelog](https://github.com/${repository}/blob/main/docs/CHANGELOG.md)
               `
             });
             

@@ -18,6 +18,7 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     
     steps:
       - name: Checkout code
@@ -40,7 +41,7 @@ jobs:
         run: npm test
         
       - name: Run E2E tests
-        run: npm run test:e2e
+        run: timeout 15m npm run test:e2e
         env:
           GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
           GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
