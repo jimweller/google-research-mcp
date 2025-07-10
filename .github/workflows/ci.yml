@@ -87,7 +87,7 @@ jobs:
         name: test-results-node-${{ matrix.node-version }}
         path: |
           coverage/
-          tests/youtube-transcript-test-report.md
+          docs/testing/youtube-transcript-test-report.md
 
   lint:
     name: Lint and Format Check
