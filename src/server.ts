@@ -29,12 +29,14 @@ import { PersistentEventStore } from "./shared/persistentEventStore.js";
 import { z } from "zod";  // Schema validation library
 import { GoogleGenAI } from "@google/genai";
 import { CheerioCrawler } from "crawlee";  // Web scraping library
-import { YoutubeTranscript } from "youtube-transcript";
+import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
 // Import cache modules using index file with .js extension
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
 // Import OAuth scopes documentation and middleware
 import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation.js";
 import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
+// Import robust YouTube transcript extractor
+import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 
 // Type definitions for express
 type Request = express.Request;
@@ -76,6 +78,7 @@ const DEFAULT_REQUEST_QUEUES_PATH = path.resolve(PROJECT_ROOT, 'storage', 'reque
 // Initialize Cache and Event Store globally so they are available for both transports
 let globalCacheInstance: PersistentCache;
 let eventStoreInstance: PersistentEventStore;
+let transcriptExtractorInstance: RobustYouTubeTranscriptExtractor;
 let stdioServerInstance: McpServer | undefined;
 let stdioTransportInstance: StdioServerTransport | undefined;
 let httpTransportInstance: StreamableHTTPServerTransport | undefined;
@@ -126,11 +129,14 @@ async function initializeGlobalInstances(
     eagerLoading: true
   });
 
+  // Initialize robust YouTube transcript extractor
+  transcriptExtractorInstance = new RobustYouTubeTranscriptExtractor();
+
   // Load data eagerly
   await globalCacheInstance.loadFromDisk(); // Cache needs explicit load
   // Event store loads eagerly via constructor option, no explicit call needed here
   if (process.env.NODE_ENV !== 'test') {
-    console.log("✅ Global Cache and Event Store initialized.");
+    console.log("✅ Global Cache, Event Store, and YouTube Transcript Extractor initialized.");
   }
 }
 
@@ -199,7 +205,9 @@ function configureToolsAndResources(
             'googleSearch',
             { query, num_results },
             async () => {
-                console.log(`Cache MISS for googleSearch: ${query}, ${num_results}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`Cache MISS for googleSearch: ${query}, ${num_results}`);
+                }
                 const key = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!;
                 const cx = process.env.GOOGLE_CUSTOM_SEARCH_ID!;
                 const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(
@@ -226,13 +234,14 @@ function configureToolsAndResources(
     };
 
     /**
-     * Scrapes content from a web page or extracts YouTube transcripts with timeout protection
+     * Scrapes content from a web page or extracts YouTube transcripts with robust error handling
      *
      * This function:
-     * 1. Detects if the URL is a YouTube video and extracts its transcript if so
+     * 1. Detects if the URL is a YouTube video and uses the robust transcript extractor
      * 2. Otherwise scrapes the page content using Cheerio
      * 3. Caches results for 1 hour with stale-while-revalidate for up to 24 hours
      * 4. Includes timeout protection and content size limits
+     * 5. Provides transparent error reporting for YouTube transcript failures
      *
      * @param url - The URL to scrape
      * @returns The page content as a text content item
@@ -244,18 +253,37 @@ function configureToolsAndResources(
             'scrapePage',
             { url },
             async () => {
-                console.log(`Cache MISS for scrapePage: ${url}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`Cache MISS for scrapePage: ${url}`);
+                }
                 let text = "";
                 const yt = url.match(
-                    /(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})/
+                    /(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})(?:[&#?]|$)/
                 );
                 
                 if (yt) {
-                    // Add timeout protection for YouTube transcript extraction
-                    const transcriptPromise = YoutubeTranscript.fetchTranscript(yt[1]);
-                    const segs = await withTimeout(transcriptPromise, 15000, 'YouTube transcript extraction');
-                    text = segs.map((s) => s.text).join(" ");
+                    // Use robust transcript extractor instead of direct call
+                    const result = await transcriptExtractorInstance.extractTranscript(yt[1]);
+                    
+                    if (result.success) {
+                        text = result.transcript!;
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.log(`✅ YouTube transcript extracted successfully for video ${yt[1]} (${result.attempts} attempts, ${result.duration}ms)`);
+                        }
+                    } else {
+                        // Throw specific error instead of returning empty text
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.error(`❌ YouTube transcript extraction failed for video ${yt[1]}: ${result.error!.message}`);
+                        }
+                        throw new YouTubeTranscriptError(
+                            result.error!.type,
+                            result.error!.message,
+                            yt[1],
+                            result.error!.originalError
+                        );
+                    }
                 } else {
+                    // Regular web scraping logic remains unchanged
                     let page = "";
                     const crawler = new CheerioCrawler({
                         requestHandler: async ({ $ }) => {
@@ -290,8 +318,9 @@ function configureToolsAndResources(
                            text.substring(text.length - halfSize);
                 }
 
-                // Ensure we have at least 100 characters for testing purposes
-                if (text.length < 100) {
+                // Note: Removed fallback content mechanism for YouTube URLs
+                // Regular web pages still get minimum content for testing if needed
+                if (!yt && text.length < 100) {
                     text = text + " " + "This is additional content to ensure the scraped text meets the minimum length requirements for testing purposes.".repeat(3);
                 }
 
@@ -350,7 +379,9 @@ function configureToolsAndResources(
             'analyzeWithGemini',
             { text: processedText, model },
             async () => {
-                console.log(`Cache MISS for analyzeWithGemini: ${processedText.substring(0, 50)}...`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`Cache MISS for analyzeWithGemini: ${processedText.substring(0, 50)}...`);
+                }
                 
                 // Add timeout protection for Gemini API calls
                 const geminiPromise = gemini.models.generateContent({
@@ -474,14 +505,20 @@ function configureToolsAndResources(
             
             try {
                 // A) Search with timeout protection
-                console.log(`🔍 Starting research for: "${query}" (${num_results} results)`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`🔍 Starting research for: "${query}" (${num_results} results)`);
+                }
                 const searchPromise = googleSearchFn({ query, num_results });
                 searchResults = await withTimeout(searchPromise, 15000, 'Google Search');
-                console.log(`✅ Search completed: ${searchResults.length} URLs found`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`✅ Search completed: ${searchResults.length} URLs found`);
+                }
             } catch (error) {
                 const errorMsg = `Search failed: ${error.message}`;
                 errors.push(errorMsg);
-                console.error(`❌ ${errorMsg}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.error(`❌ ${errorMsg}`);
+                }
                 
                 // Return early if search fails completely
                 return {
@@ -503,17 +540,23 @@ function configureToolsAndResources(
             }
 
             // B) Scrape each URL with graceful degradation using Promise.allSettled
-            console.log(`📄 Scraping ${urls.length} URLs...`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`📄 Scraping ${urls.length} URLs...`);
+            }
             const scrapePromises = urls.map(async (url, index) => {
                 try {
                     // Add per-URL timeout
                     const scrapePromise = scrapePageFn({ url });
                     const result = await withTimeout(scrapePromise, 20000, `Scraping URL ${index + 1}`);
-                    console.log(`✅ Scraped URL ${index + 1}/${urls.length}: ${url.substring(0, 50)}...`);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`✅ Scraped URL ${index + 1}/${urls.length}: ${url.substring(0, 50)}...`);
+                    }
                     return { url, result, success: true };
                 } catch (error) {
                     const errorMsg = `Failed to scrape ${url}: ${error.message}`;
-                    console.warn(`⚠️ ${errorMsg}`);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.warn(`⚠️ ${errorMsg}`);
+                    }
                     return { url, error: errorMsg, success: false };
                 }
             });
@@ -533,11 +576,15 @@ function configureToolsAndResources(
                 } else {
                     const errorMsg = `Scrape promise rejected for URL ${index + 1}: ${result.reason}`;
                     errors.push(errorMsg);
-                    console.error(`❌ ${errorMsg}`);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.error(`❌ ${errorMsg}`);
+                    }
                 }
             });
 
-            console.log(`📊 Scraping summary: ${successfulScrapes.length}/${urls.length} successful`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`📊 Scraping summary: ${successfulScrapes.length}/${urls.length} successful`);
+            }
 
             // C) Check if we have enough content to analyze
             if (successfulScrapes.length === 0) {
@@ -567,17 +614,23 @@ function configureToolsAndResources(
                 finalCombined = combined.substring(0, halfSize) +
                                "\n\n[... CONTENT TRUNCATED FOR PROCESSING LIMITS ...]\n\n" +
                                combined.substring(combined.length - halfSize);
-                console.log(`⚠️ Combined content truncated from ${combined.length} to ${finalCombined.length} characters`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`⚠️ Combined content truncated from ${combined.length} to ${finalCombined.length} characters`);
+                }
             }
 
             // E) Analyze with Gemini (with timeout protection built into analyzeWithGeminiFn)
             try {
-                console.log(`🧠 Analyzing combined content (${finalCombined.length} characters)...`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`🧠 Analyzing combined content (${finalCombined.length} characters)...`);
+                }
                 const analysisPromise = analyzeWithGeminiFn({ text: finalCombined });
                 const analysis = await withTimeout(analysisPromise, 45000, 'Gemini analysis');
                 
                 const totalTime = Date.now() - startTime;
-                console.log(`✅ Research completed in ${totalTime}ms`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`✅ Research completed in ${totalTime}ms`);
+                }
                 
                 // Append summary information to analysis
                 const summaryInfo = [
@@ -606,7 +659,9 @@ function configureToolsAndResources(
             } catch (error) {
                 const errorMsg = `Analysis failed: ${error.message}`;
                 errors.push(errorMsg);
-                console.error(`❌ ${errorMsg}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.error(`❌ ${errorMsg}`);
+                }
                 
                 // Return raw combined content if analysis fails
                 const fallbackContent = [
@@ -675,9 +730,9 @@ export async function createAppAndHttpTransport(
   eventStore: PersistentEventStore, // Accept pre-initialized event store
   oauthOptions?: OAuthMiddlewareOptions
 ) {
-  // Ensure global instances are available (they should be by now)
-  if (!globalCacheInstance || !eventStoreInstance) {
-    console.error("❌ Cannot create app: Global instances not initialized.");
+  // Ensure we have the necessary instances (either global or passed parameters)
+  if ((!globalCacheInstance || !eventStoreInstance) && (!cache || !eventStore)) {
+    console.error("❌ Cannot create app: Neither global instances nor parameters are available.");
     process.exit(1);
   }
 
@@ -890,15 +945,15 @@ app.get("/mcp/cache-stats", (_req: Request, res: Response) => {
  */
 app.get("/mcp/event-store-stats", async (_req: Request, res: Response) => {
     try {
-        // Use the globally initialized event store instance directly
-        if (!eventStoreInstance || typeof eventStoreInstance.getStats !== 'function') {
+        // Use the passed event store parameter for proper dependency injection
+        if (!eventStore || typeof eventStore.getStats !== 'function') {
           res.status(500).json({
             error: "Event store not available or not a PersistentEventStore"
           });
             return;
         }
-        // Get stats from the global instance
-        const stats = await eventStoreInstance.getStats();
+        // Get stats from the passed event store parameter
+        const stats = await eventStore.getStats();
 
         res.json({
             eventStore: {
@@ -1127,6 +1182,7 @@ export {
   httpTransportInstance,
   globalCacheInstance,
   eventStoreInstance,
+  transcriptExtractorInstance,
   initializeGlobalInstances
 };
 
