@@ -1,6 +1,6 @@
 {
   "name": "google-researcher-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "An MCP server providing Google Search, web scraping, and Gemini AI analysis tools to empower AI assistants with research capabilities.",
   "author": {
     "name": "Zohar Babin",
