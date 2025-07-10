@@ -50,8 +50,8 @@ jobs:
         NODE_ENV: test
         CI: true
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
-        GOOGLE_SEARCH_ENGINE_ID: ${{ secrets.GOOGLE_SEARCH_ENGINE_ID }}
+        GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
+        GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
 
     - name: Run E2E tests (stdio)
       run: timeout 5m npm run test:e2e:stdio
@@ -70,7 +70,7 @@ jobs:
       env:
         NODE_ENV: test
         CI: true
-        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
     - name: Upload coverage reports
       if: matrix.node-version == '20.x'
