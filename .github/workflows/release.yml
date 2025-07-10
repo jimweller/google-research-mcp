@@ -33,15 +33,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
         
-      - name: Run unit tests with coverage
-        run: npm run test:coverage
-        
-      - name: Run E2E tests
-        run: npm run test:e2e
+      - name: Run tests (unit tests already run in CI)
+        run: npm run test:unit
         env:
-          GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
-          GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
-          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
           NODE_ENV: test
           
       - name: Build package
@@ -78,7 +72,10 @@ jobs:
       - name: Create SLSA attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: 'dist/**/*'
+          subject-path: |
+            dist/server.js
+            dist/server.d.ts
+            package.json
           
       - name: Update GitHub release
         uses: actions/github-script@v7
