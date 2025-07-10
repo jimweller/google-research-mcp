@@ -67,12 +67,14 @@ graph TD
         G[scrape_page]
         H[analyze_with_gemini]
         I[research_topic]
+        YT[YouTube Transcript Extractor]
     end
 
     subgraph "External Services"
         M[Google Search API]
-        N[Web Pages or YouTube]
+        N[Web Pages]
         O[Google Gemini API]
+        P[YouTube Transcript API]
     end
 
     A -- Connects via --> B
@@ -88,12 +90,17 @@ graph TD
     E -- Invokes --> H
     E -- Invokes --> I
 
+    G -- Uses --> YT
+
     F -- Calls --> M
     G -- Calls --> N
     H -- Calls --> O
+    YT -- Calls --> P
 
-    F & G & H & I -- Use for caching --> J
+    F & G & H & I & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
+
+    style YT fill:#cce5ff,stroke:#333,stroke-width:2px
 
     style J fill:#e6f2ff,stroke:#333,stroke-width:2px
     style K fill:#e6ffe6,stroke:#333,stroke-width:2px
@@ -142,6 +149,16 @@ For a complete guide on configuration, see the [**Security Implementation Guide*
 -   **File**: [`src/server.ts`](../src/server.ts)
 -   **Description**: This layer contains the concrete implementation of the server's capabilities. Each tool is registered with the MCP Core and is responsible for a specific action. All tools are designed to be stateless and rely on the caching system for performance.
 -   **Timeout Handling**: Each tool that interacts with an external network has a built-in timeout to prevent it from hanging indefinitely. This is a critical component of the server's reliability.
+
+### YouTube Transcript Extractor
+-   **File**: [`src/youtube/transcriptExtractor.ts`](../src/youtube/transcriptExtractor.ts)
+-   **Description**: A specialized component responsible for fetching, parsing, and cleaning transcripts from YouTube videos. It is designed for high reliability and resilience.
+-   **Key Features**:
+    -   **Robust Error Handling**: Identifies 10 distinct error types and provides clear, user-friendly messages.
+    -   **Automatic Retries**: Implements an exponential backoff strategy to handle transient network errors and rate limiting.
+    -   **Performance Optimized**: Significantly faster and more efficient than previous methods.
+-   **Integration**: This component is used exclusively by the `scrape_page` tool when a YouTube URL is detected.
+-   **Further Reading**: [**YouTube Transcript Extraction Technical Documentation**](./youtube-transcript-extraction.md)
 
 ### Caching System
 
