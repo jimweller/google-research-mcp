@@ -89,6 +89,8 @@ describe('Server Core Functionality', () => {
 
     // Ensure test storage directory exists
     await fs.mkdir(testStorageDir, { recursive: true });
+    await fs.mkdir(path.dirname(testCachePath), { recursive: true });
+    await fs.mkdir(path.dirname(testEventPath), { recursive: true });
     await fs.mkdir(testRequestQueuesPath, { recursive: true });
   });
 
@@ -100,16 +102,52 @@ describe('Server Core Functionality', () => {
     if (testEventStore) {
       await testEventStore.dispose();
     }
-    await fs.rm(testStorageDir, { recursive: true, force: true });
+    
+    // Clean up any remaining directories
+    try {
+      await fs.rm(testStorageDir, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore cleanup errors in tests
+      console.warn('Test cleanup warning:', error.message);
+    }
 
     // Clear environment variables
     delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
     delete process.env.GOOGLE_CUSTOM_SEARCH_ID;
     delete process.env.GOOGLE_GEMINI_API_KEY;
+    
+    // Remove any SIGINT listeners to prevent memory leaks
+    process.removeAllListeners('SIGINT');
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Reset any module-level state that might interfere between tests
+    process.removeAllListeners('SIGINT');
+  });
+
+  afterEach(async () => {
+    // Cleanup any test-specific resources
+    if (testCache && typeof testCache.dispose === 'function') {
+      try {
+        await testCache.dispose();
+      } catch (error) {
+        // Ignore disposal errors in tests
+      }
+    }
+    if (testEventStore && typeof testEventStore.dispose === 'function') {
+      try {
+        await testEventStore.dispose();
+      } catch (error) {
+        // Ignore disposal errors in tests
+      }
+    }
+    // Reset test instances
+    testCache = null;
+    testEventStore = null;
+    
+    // Clean up any listeners to prevent memory leaks
+    process.removeAllListeners('SIGINT');
   });
 
   describe('Global Instance Initialization', () => {
