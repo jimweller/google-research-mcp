@@ -91,18 +91,18 @@ jobs:
               owner,
               repo,
               release_id,
-              body: `${releaseNotes}
+              body: releaseNotes + `
               
-              ## 📦 Installation
-              \`\`\`bash
-              npm install google-researcher-mcp@${version}
-              \`\`\`
-              
-              ## 🔗 Links
-              - [npm package](https://www.npmjs.com/package/google-researcher-mcp/v/${version})
-              - [Documentation](https://github.com/${repository}#readme)
-              - [Changelog](https://github.com/${repository}/blob/main/docs/CHANGELOG.md)
-              `
+## 📦 Installation
+\`\`\`bash
+npm install google-researcher-mcp@${version}
+\`\`\`
+
+## 🔗 Links
+- [npm package](https://www.npmjs.com/package/google-researcher-mcp/v/${version})
+- [Documentation](https://github.com/${repository}#readme)
+- [Changelog](https://github.com/${repository}/blob/main/docs/CHANGELOG.md)
+`
             });
             
       - name: Create deployment summary
