@@ -6,20 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## [1.2.1] - 2025-07-15
-
-### Fixed
-- **Critical Scraping Issue**: Resolved a critical bug where `scrape_page` and `research_topic` tools were returning placeholder test content instead of actual scraped web data.
-  - **Root Cause**: Removed problematic fallback mechanism that was adding dummy test content when scraped text was shorter than 100 characters.
-  - **Impact**: Both tools now consistently return real web content, dramatically improving data quality and user experience.
-  - **Verification**: Comprehensive testing confirmed tools now extract actual content from web pages and GitHub discussions.
-- **Cache Cleanup**: Cleared all cached placeholder responses to ensure fresh, real content delivery.
-- **Build System**: Rebuilt entire project with clean artifacts to ensure fix propagation.
-
-### Improved
-- **Testing**: All 244 unit tests and end-to-end tests pass successfully, confirming system integrity.
-- **Performance**: Maintained high performance while ensuring data authenticity.
-
 
 ## [1.2.0] - 2025-01-09
 

@@ -9,6 +9,8 @@
 > **Empower AI assistants with robust, persistent, and secure web research capabilities.**
 >
 > This server implements the [Model Context Protocol (MCP)](https://github.com/zoharbabin/google-research-mcp), providing a suite of tools for Google Search, content scraping, and Gemini AI analysis. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
+>
+> **🎉 Latest Update (v1.2.1):** Fixed critical issue where `scrape_page` and `research_topic` tools were returning placeholder test content instead of actual scraped data. All tools now return real web content as expected.
 
 <img width="499" alt="image" src="https://github.com/user-attachments/assets/e369b537-3043-4f80-b7f2-410512ebc1b4" />
 

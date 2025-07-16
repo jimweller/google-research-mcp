@@ -319,10 +319,8 @@ function configureToolsAndResources(
                 }
 
                 // Note: Removed fallback content mechanism for YouTube URLs
-                // Regular web pages still get minimum content for testing if needed
-                if (!yt && text.length < 100) {
-                    text = text + " " + "This is additional content to ensure the scraped text meets the minimum length requirements for testing purposes.".repeat(3);
-                }
+                // Allow scraped content to be returned as-is, even if short
+                // This ensures actual web content is returned instead of test placeholders
 
                 return [{ type: "text" as const, text }];
             },
