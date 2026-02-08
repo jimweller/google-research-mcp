@@ -3,7 +3,7 @@
 [![Tests](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/zoharbabin/google-research-mcp/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/zoharbabin/google-research-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 > **Empower AI assistants with robust, persistent, and secure web research capabilities.**
@@ -24,8 +24,10 @@
   - [Prerequisites](#prerequisites)
   - [Installation & Setup](#installation--setup)
   - [Running the Server](#running-the-server)
+  - [Running with Docker](#running-with-docker)
 - [Usage](#usage)
   - [Available Tools](#available-tools)
+  - [Quick Start with npx](#quick-start-with-npx)
   - [Client Integration](#client-integration)
   - [Management API](#management-api)
 - [Performance & Reliability](#performance--reliability)
@@ -177,7 +179,7 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
 
 ### Prerequisites
 
-- **Node.js**: Version 18.0.0 or higher.
+- **Node.js**: Version 20.0.0 or higher.
 - **API Keys**:
   - [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction)
   - [Google Custom Search Engine ID](https://programmablesearchengine.google.com/)
@@ -220,6 +222,35 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
     npm start
     ```
 
+### Running with Docker
+
+Build the image and run with your API keys passed at runtime via `--env-file`:
+
+```bash
+# Build the image
+docker build -t google-researcher-mcp .
+
+# Run in stdio mode (default, for MCP clients)
+docker run -i --rm --env-file .env google-researcher-mcp
+
+# Run with HTTP transport on port 3000
+docker run -d --rm --env-file .env -e MCP_TEST_MODE= -p 3000:3000 google-researcher-mcp
+```
+
+**Security note:** Never bake secrets into the Docker image. Always pass them at runtime via `--env-file` or individual `-e` flags.
+
+**Docker with Claude Code** (`~/.claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--env-file", "/path/to/.env", "google-researcher-mcp"]
+    }
+  }
+}
+```
+
 Upon successful startup, you will see confirmation that the transports are ready:
 ```
 ✅ stdio transport ready
@@ -238,6 +269,44 @@ The server provides a suite of powerful tools for research and analysis. Each to
 | **`scrape_page`** | **Scrape Page** | **Description:** Extracts text content from web pages and YouTube videos with robust transcript extraction capabilities. Features comprehensive error handling with 10 distinct error types (TRANSCRIPT_DISABLED, VIDEO_UNAVAILABLE, NETWORK_ERROR, etc.), automatic retry logic with exponential backoff for transient failures, and user-friendly error messages. Supports both youtube.com/watch?v= and youtu.be/ URL formats. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL of the web page or YouTube video to scrape. YouTube URLs automatically extract transcripts when available. |
 | **`analyze_with_gemini`** | **Gemini Analysis** | **Description:** Processes and analyzes text content using Google's Gemini AI models. It can summarize, answer questions, and generate insights from provided text. Large texts are automatically truncated. Results are cached for 15 minutes.<br><br>**Parameters:**<br> - `text` (string, required): The text content to analyze.<br> - `model` (string, optional, default: "gemini-2.0-flash-001"): The Gemini model to use (e.g., `gemini-2.0-flash-001`, `gemini-pro`). |
 | **`research_topic`** | **Research Topic** | **Description:** A powerful composite tool that automates the entire research process: it searches for a topic, scrapes the content from multiple sources, and synthesizes the findings with Gemini AI. It's designed for resilience and provides comprehensive analysis.<br><br>**Parameters:**<br> - `query` (string, required): The research topic or question.<br> - `num_results` (number, optional, default: 3): The number of sources to research (recommended: 2-5). |
+
+### Quick Start with npx
+
+You can run the server directly via `npx` without cloning the repository. This is the easiest way to integrate with MCP-compatible clients.
+
+**Claude Code** (`~/.claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "npx",
+      "args": ["-y", "google-researcher-mcp"],
+      "env": {
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
+        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx",
+        "GOOGLE_GEMINI_API_KEY": "your-gemini-key"
+      }
+    }
+  }
+}
+```
+
+**Roo Code / Cline** (MCP settings):
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "npx",
+      "args": ["-y", "google-researcher-mcp"],
+      "env": {
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
+        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx",
+        "GOOGLE_GEMINI_API_KEY": "your-gemini-key"
+      }
+    }
+  }
+}
+```
 
 ### Client Integration
 

@@ -74,7 +74,8 @@ jest.mock('crawlee', () => ({
       }
       return Promise.resolve();
     })
-  }))
+  })),
+  Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) }
 }));
 
 // Mock YouTube transcript with different scenarios

@@ -25,7 +25,8 @@ jest.mock('@google/genai', () => ({
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(() => ({
     run: jest.fn(() => Promise.resolve())
-  }))
+  })),
+  Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) }
 }));
 
 jest.mock('@danielxceron/youtube-transcript', () => ({

@@ -40,7 +40,8 @@ jest.mock('crawlee', () => ({
       }
       return Promise.resolve();
     })
-  }))
+  })),
+  Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) }
 }));
 
 jest.mock('@danielxceron/youtube-transcript', () => ({

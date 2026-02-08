@@ -28,7 +28,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { PersistentEventStore } from "./shared/persistentEventStore.js";
 import { z } from "zod";  // Schema validation library
 import { GoogleGenAI } from "@google/genai";
-import { CheerioCrawler } from "crawlee";  // Web scraping library
+import { CheerioCrawler, Configuration } from "crawlee";  // Web scraping library
 import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
 // Import cache modules using index file with .js extension
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
@@ -111,7 +111,7 @@ const PROJECT_ROOT = findProjectRoot(__dirname);
 // --- Default Paths ---
 const DEFAULT_CACHE_PATH = path.resolve(PROJECT_ROOT, 'storage', 'persistent_cache');
 const DEFAULT_EVENT_PATH = path.resolve(PROJECT_ROOT, 'storage', 'event_store');
-const DEFAULT_REQUEST_QUEUES_PATH = path.resolve(PROJECT_ROOT, 'storage', 'request_queues', 'default');
+const DEFAULT_CRAWLEE_STORAGE_PATH = path.resolve(PROJECT_ROOT, 'storage', 'crawlee');
 
 // --- Global Instances ---
 // Initialize Cache and Event Store globally so they are available for both transports
@@ -132,13 +132,13 @@ let httpTransportInstance: StreamableHTTPServerTransport | undefined;
 async function initializeGlobalInstances(
   cachePath: string = DEFAULT_CACHE_PATH,
   eventPath: string = DEFAULT_EVENT_PATH,
-  requestQueuesPath: string = DEFAULT_REQUEST_QUEUES_PATH
+  crawleeStoragePath: string = DEFAULT_CRAWLEE_STORAGE_PATH
 ) {
   // Ensure directories exist
   try {
     await fs.mkdir(path.dirname(cachePath), { recursive: true });
     await fs.mkdir(path.dirname(eventPath), { recursive: true });
-    await fs.mkdir(requestQueuesPath, { recursive: true });
+    await fs.mkdir(crawleeStoragePath, { recursive: true });
     if (process.env.NODE_ENV !== 'test') {
       console.log(`✅ Ensured storage directories exist.`);
     }
@@ -146,6 +146,15 @@ async function initializeGlobalInstances(
     console.error(`❌ Error ensuring storage directories: ${error}`);
     process.exit(1); // Exit if we can't create storage dirs
   }
+
+  // Configure Crawlee to not persist request queues, datasets, or key-value stores
+  // to the filesystem. We only use CheerioCrawler for single-page scrapes, so
+  // persistent storage is unnecessary and creates filesystem clutter.
+  const crawleeConfig = Configuration.getGlobalConfig();
+  crawleeConfig.set('persistStorage', false);
+  crawleeConfig.set('storageClientOptions', {
+    localDataDirectory: crawleeStoragePath,
+  });
 
   globalCacheInstance = new PersistentCache({
     defaultTTL: 5 * 60 * 1000, // 5 minutes default TTL
@@ -396,6 +405,10 @@ function configureToolsAndResources(
                                 ];
                             },
                         ],
+                        // Disable session pool and cookie persistence — we do single-page
+                        // scrapes and don't need cross-request session tracking.
+                        useSessionPool: false,
+                        persistCookiesPerSession: false,
                         // Add timeout configuration to crawler
                         requestHandlerTimeoutSecs: 15, // 15 second timeout
                         maxRequestsPerCrawl: 1, // Only process the single URL
