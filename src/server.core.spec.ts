@@ -243,7 +243,6 @@ describe('Server Core Functionality', () => {
       const endpoints = [
         '/mcp/cache-stats',
         '/mcp/event-store-stats',
-        '/mcp/cache-persist',
         '/mcp/oauth-config',
         '/mcp/oauth-scopes'
       ];

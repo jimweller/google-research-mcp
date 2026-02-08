@@ -158,7 +158,7 @@ describe('Enhanced Tool Descriptions - Server Integration', () => {
     it('should handle cache management endpoints', async () => {
       // Test cache persistence endpoint (requires auth)
       const response = await supertest(app)
-        .get('/mcp/cache-persist')
+        .post('/mcp/cache-persist')
         .set('x-api-key', 'test-admin-key')
         .expect(200);
 

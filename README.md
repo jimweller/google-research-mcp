@@ -135,45 +135,26 @@ The server includes a robust YouTube transcript extraction system that provides 
 - **Production Optimizations**: 91% performance improvement and 80% log reduction
 - **User-Friendly Feedback**: Clear error messages explaining why transcript extraction failed
 
-### Supported Error Types
+### Error Handling & Retries
 
-| Error Code | Description | User Action |
-|:---|:---|:---|
-| `TRANSCRIPT_DISABLED` | Video owner disabled transcripts | Try a different video |
-| `VIDEO_UNAVAILABLE` | Video no longer available | Verify the URL and video status |
-| `VIDEO_NOT_FOUND` | Invalid video ID or URL | Check the YouTube URL format |
-| `NETWORK_ERROR` | Network connectivity issues | System will retry automatically |
-| `RATE_LIMITED` | YouTube API rate limiting | System will retry with backoff |
-| `TIMEOUT` | Request timed out | System will retry automatically |
-| `PARSING_ERROR` | Transcript data parsing failed | Contact support if persistent |
-| `REGION_BLOCKED` | Video blocked in server region | Use proxy if needed |
-| `PRIVATE_VIDEO` | Video requires authentication | Use public videos only |
-| `UNKNOWN` | Unexpected error occurred | Contact support with details |
+The system classifies 10 distinct error types (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`, `NETWORK_ERROR`) with clear, actionable messages. Transient errors (`NETWORK_ERROR`, `RATE_LIMITED`, `TIMEOUT`) are automatically retried up to 3 times with exponential backoff.
 
-### Retry Behavior
-
-The system automatically retries failed requests for transient errors:
-- **Maximum Attempts**: 3 retries for `NETWORK_ERROR`, `RATE_LIMITED`, and `TIMEOUT`
-- **Exponential Backoff**: Progressive delays between retries to avoid overwhelming YouTube's API
-- **Smart Recovery**: Only retries errors that are likely to succeed on subsequent attempts
-
-### Example Error Messages
-
-When transcript extraction fails, users receive clear, specific error messages:
-
-```
-Failed to retrieve YouTube transcript for https://www.youtube.com/watch?v=xxxx.
-Reason: TRANSCRIPT_DISABLED - The video owner has disabled transcripts.
-```
-
-```
-Failed to retrieve YouTube transcript for https://www.youtube.com/watch?v=xxxx after 3 attempts.
-Reason: NETWORK_ERROR - A network error occurred.
-```
-
-For complete technical details, see the [YouTube Transcript Extraction Documentation](./docs/youtube-transcript-extraction.md).
+For the full error codes table, retry behavior details, and example error messages, see the [YouTube Transcript Extraction Documentation](./docs/youtube-transcript-extraction.md).
 
 ## Getting Started
+
+### Quick Start
+
+Get the server running locally in three steps:
+
+```bash
+git clone https://github.com/zoharbabin/google-research-mcp.git && cd google-researcher-mcp
+npm install && npx playwright install chromium
+cp .env.example .env   # Then add your Google API keys to .env
+npm run dev            # Server is now running on STDIO transport
+```
+
+> **Note:** This starts the server in STDIO mode, which is all you need for local AI assistant integrations (Claude Code, Cline, Roo Code). HTTP transport with OAuth is only required for web-based or multi-client setups — see [Choosing a Transport](#choosing-a-transport).
 
 ### Prerequisites
 
@@ -203,7 +184,7 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
     ```bash
     cp .env.example .env
     ```
-    Now, open `.env` in your editor and add your API keys and OAuth configuration. See the comments in `.env.example` for detailed explanations of each variable.
+    Now, open `.env` in your editor and add your Google API keys. OAuth configuration is only needed if you plan to use HTTP transport — you can skip it for STDIO. See the comments in `.env.example` for detailed explanations of each variable.
 
 ### Running the Server
 
@@ -233,6 +214,7 @@ docker build -t google-researcher-mcp .
 docker run -i --rm --env-file .env google-researcher-mcp
 
 # Run with HTTP transport on port 3000
+# (MCP_TEST_MODE= overrides the Dockerfile default of "stdio" to enable HTTP)
 docker run -d --rm --env-file .env -e MCP_TEST_MODE= -p 3000:3000 google-researcher-mcp
 ```
 

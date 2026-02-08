@@ -156,7 +156,7 @@ For security configuration details, see the OAuth 2.1 section in the [**README**
     -   **Automatic Retries**: Implements an exponential backoff strategy to handle transient network errors and rate limiting.
     -   **Performance Optimized**: Significantly faster and more efficient than previous methods.
 -   **Integration**: This component is used exclusively by the `scrape_page` tool when a YouTube URL is detected.
--   **Further Reading**: [**YouTube Transcript Extraction Technical Documentation**](./youtube-transcript-extraction.md)
+-   **Further Reading**: [**YouTube Transcript Extraction Technical Documentation**](../youtube-transcript-extraction.md)
 
 ### Caching System
 

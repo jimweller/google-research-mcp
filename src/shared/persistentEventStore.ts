@@ -88,8 +88,6 @@ export class PersistentEventStore implements EventStore {
       totalRequests: 0
     };
 
-    // console.log(`Loaded ${this.events.length} events from disk`); // Removed for test hygiene
-
     // Set up the persistence callback
     this.persistenceManager.setOnPersistCallback(() => Promise.resolve(this.memoryStore));
     
@@ -114,7 +112,6 @@ export class PersistentEventStore implements EventStore {
     try {
       const events = await this.persistenceManager.loadEvents();
       this.memoryStore = events;
-      // console.log(`Loaded ${events.size} events from disk`); // Removed for test hygiene
     } catch (error) {
       logger.error('Failed to load events from disk', { error: String(error) });
     }

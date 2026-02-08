@@ -410,7 +410,6 @@ export class Cache {
     if (this.cleanupIntervalId) {
       clearInterval(this.cleanupIntervalId);
       this.cleanupIntervalId = null;
-      // console.log('Cache cleanup interval stopped.'); // Optional: for debugging
     }
     // Clear other resources if necessary in the future
   }

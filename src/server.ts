@@ -19,28 +19,22 @@
 import express from "express";
 import cors from "cors";
 import path from "node:path";
-import { fileURLToPath } from 'node:url'; // Import fileURLToPath
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises"; // Import fs promises for directory creation
-import { readFileSync } from "node:fs";
+import fs from "node:fs/promises";
+import { readFileSync, existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PersistentEventStore } from "./shared/persistentEventStore.js";
-import { z } from "zod";  // Schema validation library
-import { CheerioCrawler, PlaywrightCrawler, Configuration } from "crawlee";  // Web scraping library
-// Import cache modules using index file with .js extension
+import { z } from "zod";
+import { CheerioCrawler, PlaywrightCrawler, Configuration } from "crawlee";
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
-// Import OAuth scopes documentation and middleware
 import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation.js";
 import { createOAuthMiddleware, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
-// Import robust YouTube transcript extractor
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
-// Import SSRF protection
 import { validateUrlForSSRF, SSRFProtectionError, getSSRFOptionsFromEnv } from "./shared/urlValidator.js";
-// Import structured logger
 import { logger } from "./shared/logger.js";
-// Import rate limiter for HTTP transport
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 // ── Server Configuration Constants ─────────────────────────────
@@ -91,7 +85,7 @@ function findProjectRoot(startDir: string): string {
     try {
       // Check if package.json exists in current directory
       const packageJsonPath = path.join(currentDir, 'package.json');
-      if (require('fs').existsSync(packageJsonPath)) {
+      if (existsSync(packageJsonPath)) {
         return currentDir;
       }
     } catch {
@@ -495,10 +489,6 @@ function configureToolsAndResources(
                            text.substring(text.length - halfSize);
                 }
 
-                // Note: Removed fallback content mechanism for YouTube URLs
-                // Allow scraped content to be returned as-is, even if short
-                // This ensures actual web content is returned instead of test placeholders
-
                 return [{ type: "text" as const, text }];
             },
             {
@@ -508,8 +498,6 @@ function configureToolsAndResources(
             }
         );
 
-        // Session transcripts are now handled in the session initialization handler
-        // We'll return the result directly
         return result;
     };
 
@@ -541,11 +529,6 @@ function configureToolsAndResources(
         },
         async ({ url }) => {
             const result = await scrapePageFn({ url });
-
-            // Note: In SDK v1.11.0, we can't directly access the session ID from the tool handler
-            // Session transcripts are now updated through the event system when events are processed
-            // The session-specific resources are registered in the session initialization handler
-
             return { content: result };
         }
     );
@@ -699,8 +682,7 @@ async function setupStdioTransport() {
     name: "google-researcher-mcp-stdio",
     version: PKG_VERSION
   });
-  // Configure tools using the global cache/store (implicitly via configureToolsAndResources)
-  configureToolsAndResources(stdioServerInstance); // This function needs access to globalCacheInstance
+  configureToolsAndResources(stdioServerInstance);
   stdioTransportInstance = new StdioServerTransport();
   await stdioServerInstance.connect(stdioTransportInstance);
   logger.info('stdio transport ready');
@@ -714,10 +696,9 @@ async function setupStdioTransport() {
  * @param oauthOptions - Optional OAuth configuration
  * @returns Object containing the Express app and the HTTP transport instance
  */
-// Add async keyword here
 export async function createAppAndHttpTransport(
-  cache: PersistentCache, // Accept pre-initialized cache
-  eventStore: PersistentEventStore, // Accept pre-initialized event store
+  cache: PersistentCache,
+  eventStore: PersistentEventStore,
   oauthOptions?: OAuthMiddlewareOptions
 ) {
   // Ensure we have the necessary instances (either global or passed parameters)
@@ -798,7 +779,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
 
   // Configure OAuth middleware if options are provided
   let oauthMiddleware: ReturnType<typeof createOAuthMiddleware> | undefined;
-  if (oauthOptions) { // Use passed-in options
+  if (oauthOptions) {
     oauthMiddleware = createOAuthMiddleware(oauthOptions);
     logger.info('OAuth 2.1 middleware configured');
   }
@@ -821,17 +802,15 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
     version: PKG_VERSION
   });
 
-  // Configure tools and resources for the server (using the global function)
-  configureToolsAndResources(httpServer); // Call configureTools here
+  configureToolsAndResources(httpServer);
 
   // Create the streamable HTTP transport with session management
-  httpTransportInstance = new StreamableHTTPServerTransport({ // Assign to the global variable
+  httpTransportInstance = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
-    eventStore: eventStoreInstance, // Use the passed-in instance
+    eventStore: eventStoreInstance,
     onsessioninitialized: (sid) => {
       logger.info('SSE session initialized', { sessionId: sid });
     },
-    // Removed onclose handler - rely on transport's internal management
   });
 
 
@@ -893,10 +872,8 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
 
       // For existing sessions, delegate to the transport
       // The StreamableHTTPServerTransport should handle batch requests correctly
-      // console.log(`Processing ${isBatch ? 'batch' : 'single'} request with session ID: ${sidHeader}`); // Reduce noise
-      await httpTransportInstance.handleRequest(req, res, req.body); // Use the instance variable
+      await httpTransportInstance.handleRequest(req, res, req.body);
     } catch (err) {
-      // console.error("Error processing request:", err); // Reduce noise, rely on default handler
       next(err);
     }
   });
@@ -904,11 +881,8 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
   // Handle GET and DELETE requests to /mcp (SSE connections and session teardown)
   const handleSessionRequest = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const sid = req.headers["mcp-session-id"] as string;
-      // Removed explicit session validation - rely on transport's handleRequest
-      await httpTransportInstance.handleRequest(req, res); // Use the instance variable
+      await httpTransportInstance.handleRequest(req, res);
     } catch (err) {
-      // console.error("Error processing session request:", err); // Reduce noise
       next(err);
     }
   };
@@ -929,7 +903,6 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
  * Useful for monitoring cache performance and diagnosing issues.
  */
 app.get("/mcp/cache-stats", (_req: Request, res: Response) => {
-    // Use the globally initialized cache instance directly
     const stats = globalCacheInstance.getStats();
     const processStats = process.memoryUsage();
 
@@ -1023,7 +996,6 @@ app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
     const { namespace, args } = req.body;
 
     if (namespace && args) {
-      // Invalidate specific entry using the global instance
       globalCacheInstance.invalidate(namespace, args);
       res.json({
         success: true,
@@ -1031,7 +1003,6 @@ app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
             invalidatedAt: new Date().toISOString()
         });
     } else {
-      // Clear entire cache using the global instance
       globalCacheInstance.clear();
       res.json({
         success: true,
@@ -1067,7 +1038,6 @@ app.post("/mcp/cache-persist", async (req: Request, res: Response) => {
  }
 
  try {
-   // Use the global instance
    await globalCacheInstance.persistToDisk();
    res.json({
      success: true,
@@ -1083,38 +1053,6 @@ app.post("/mcp/cache-persist", async (req: Request, res: Response) => {
   }
 });
 
-// Add GET endpoint for cache persistence (for easier access via browser or curl)
-app.get("/mcp/cache-persist", async (req: Request, res: Response) => {
- const expectedKey = process.env.CACHE_ADMIN_KEY;
- if (!expectedKey) {
-   res.status(503).json({
-     error: "Service Unavailable",
-     message: "Cache admin endpoints are disabled. Set CACHE_ADMIN_KEY environment variable to enable."
-   });
-   return;
- }
- const apiKey = req.headers["x-api-key"];
- if (apiKey !== expectedKey) {
-   res.status(401).json({ error: "Unauthorized" });
-   return;
- }
-
- try {
-   // Use the global instance
-   await globalCacheInstance.persistToDisk();
-   res.json({
-     success: true,
-      message: "Cache persisted successfully",
-      persistedAt: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to persist cache",
-      error: (error as Error).message
-    });
-  }
-});
 
 /**
  * OAuth Scopes Documentation endpoint
@@ -1140,7 +1078,7 @@ app.get("/mcp/oauth-scopes", (req: Request, res: Response) => {
  * This endpoint is public and does not require authentication.
  */
 app.get("/mcp/oauth-config", (_req: Request, res: Response) => {
-  const oauthEnabled = !!oauthOptions; // Use passed-in options
+  const oauthEnabled = !!oauthOptions;
 
   res.json({
     oauth: {
@@ -1192,8 +1130,8 @@ app.get("/mcp/oauth-token-info",
  * Ensures cache data is written to disk when the server is terminated
  * with SIGINT (Ctrl+C). This prevents data loss during shutdown.
  */
-process.on('SIGINT', async () => {
-    logger.info('Closing transports and persisting data before exit...');
+async function gracefulShutdown(signal: string) {
+    logger.info(`Received ${signal}. Closing transports and persisting data before exit...`);
     try {
         if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
           await stdioTransportInstance.close();
@@ -1219,36 +1157,10 @@ process.on('SIGINT', async () => {
         logger.error('Error during graceful shutdown', { error: String(error) });
     }
     process.exit(0);
-});
+}
 
-process.on('SIGTERM', async () => {
-    logger.info('Received SIGTERM. Closing transports and persisting data before exit...');
-    try {
-        if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
-          await stdioTransportInstance.close();
-          logger.info('STDIO transport closed.');
-        }
-        if (httpTransportInstance && typeof httpTransportInstance.close === 'function') {
-          await httpTransportInstance.close();
-          logger.info('HTTP transport closed.');
-        }
-
-        if (globalCacheInstance && typeof globalCacheInstance.dispose === 'function') {
-          await globalCacheInstance.dispose();
-        } else {
-          logger.warn('globalCacheInstance dispose method not found or cache not available.');
-        }
-
-        if (eventStoreInstance && typeof eventStoreInstance.dispose === 'function') {
-            await eventStoreInstance.dispose();
-        } else {
-          logger.warn('eventStoreInstance dispose method not found or event store not available.');
-        }
-    } catch (error) {
-        logger.error('Error during graceful shutdown', { error: String(error) });
-    }
-    process.exit(0);
-});
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 // ─── 5️⃣ HTTP SERVER STARTUP ────────────────────────────────────────────────────
 /**
@@ -1259,7 +1171,7 @@ process.on('SIGTERM', async () => {
  */
   // Return the app and the created HTTP transport instance
   return { app, httpTransport: httpTransportInstance };
-} // <-- Closing brace for createAppAndHttpTransport
+}
 
 // Export global instances for potential use in test setup/teardown
 export {

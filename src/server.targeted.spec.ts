@@ -417,12 +417,6 @@ describe('Targeted Server Coverage Tests', () => {
         .set('x-api-key', 'test-admin-key');
       expect(postResponse.status).toBe(200);
       expect(postResponse.body.success).toBe(true);
-
-      const getResponse = await supertest(app)
-        .get('/mcp/cache-persist')
-        .set('x-api-key', 'test-admin-key');
-      expect(getResponse.status).toBe(200);
-      expect(getResponse.body.success).toBe(true);
     });
   });
 
