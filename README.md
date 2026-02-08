@@ -1,81 +1,93 @@
 # Google Researcher MCP Server
 
 [![Tests](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml)
-[![codecov](https://codecov.io/gh/zoharbabin/google-research-mcp/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/zoharbabin/google-research-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/CONTRIBUTING.md)
 
-> **Empower AI assistants with robust, persistent, and secure web research capabilities.**
->
-> This server implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), providing tools for Google Search, web scraping, and multi-source content gathering. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives AI assistants the ability to search Google, scrape web pages (including JavaScript-rendered sites), and extract YouTube transcripts. Built for performance, reliability, and security.
 
-<img width="499" alt="image" src="https://github.com/user-attachments/assets/e369b537-3043-4f80-b7f2-410512ebc1b4" />
+<img width="499" alt="Screenshot of the Google Researcher MCP Server running in a terminal, showing tool registration and transport readiness" src="https://github.com/user-attachments/assets/e369b537-3043-4f80-b7f2-410512ebc1b4" />
+
+## Quick Start
+
+### Zero-Install (npx)
+
+The fastest way to start — no cloning required. Add this to your MCP client config:
+
+**Claude Code** (`~/.claude/claude_desktop_config.json`), **Cline**, or **Roo Code** (MCP settings):
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "npx",
+      "args": ["-y", "google-researcher-mcp"],
+      "env": {
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
+        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
+      }
+    }
+  }
+}
+```
+
+Replace `your-key` and `your-cx` with your [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction) and [Search Engine ID](https://programmablesearchengine.google.com/).
+
+### Local Development
+
+```bash
+git clone https://github.com/zoharbabin/google-research-mcp.git && cd google-researcher-mcp
+npm install && npx playwright install chromium
+cp .env.example .env   # Then add your Google API keys to .env
+npm run dev            # Server is now running on STDIO transport
+```
+
+> **Note:** This starts the server in STDIO mode, which is all you need for local AI assistant integrations. HTTP transport with OAuth is only required for web-based or multi-client setups — see [Choosing a Transport](#choosing-a-transport).
+
+---
 
 ## Table of Contents
 
-- [Why Use This Server?](#why-use-this-server)
+- [Available Tools](#available-tools)
 - [Features](#features)
 - [System Architecture](#system-architecture)
-- [YouTube Transcript Extraction](#youtube-transcript-extraction)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation & Setup](#installation--setup)
   - [Running the Server](#running-the-server)
   - [Running with Docker](#running-with-docker)
 - [Usage](#usage)
-  - [Available Tools](#available-tools)
-  - [Quick Start with npx](#quick-start-with-npx)
+  - [Choosing a Transport](#choosing-a-transport)
   - [Client Integration](#client-integration)
   - [Management API](#management-api)
-- [Performance & Reliability](#performance--reliability)
 - [Security](#security)
   - [OAuth 2.1 Authorization](#oauth-21-authorization)
   - [Available Scopes](#available-scopes)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
-## Why Use This Server?
+## Available Tools
 
-- **Extend AI Capabilities**: Grant AI assistants access to real-time web information via search and scraping.
-- **Maximize Performance**: Reduce latency for repeated queries with a two-layer persistent cache (in-memory and disk).
-- **Reduce Costs**: Minimize expensive API calls to Google Search by caching results.
-- **Ensure Reliability**: Comprehensive timeout handling, graceful degradation, and resilient multi-source scraping.
-- **Flexible & Secure Integration**: Connect any MCP-compatible client via STDIO or HTTP+SSE, with enterprise-grade OAuth 2.1 for secure API access.
-- **Open & Extensible**: MIT licensed, fully open-source, and designed for easy modification and extension.
+| Tool | Description |
+| :--- | :--- |
+| **`google_search`** | Search the web via Google Custom Search API. Returns ranked URLs with optional recency filtering (`day`, `week`, `month`, `year`). Results cached for 30 minutes.<br><br>**Parameters:** `query` (string, required, 1-500 chars), `num_results` (number, optional, 1-10, default 5), `time_range` (string, optional: `day` \| `week` \| `month` \| `year`). |
+| **`scrape_page`** | Extract text from any web page or YouTube video. Static pages are scraped instantly with CheerioCrawler; JavaScript-heavy sites (React, Next.js, SPAs) automatically fall back to Playwright/Chromium. YouTube URLs auto-extract transcripts with retry logic. Results cached for 1 hour.<br><br>**Parameters:** `url` (string, required, max 2048 chars). |
+| **`search_and_scrape`** | Composite tool: searches Google, scrapes the top results in parallel, and returns combined content with source attribution. Ideal for multi-source research in a single call.<br><br>**Parameters:** `query` (string, required, 1-500 chars), `num_results` (number, optional, 1-10, default 3), `include_sources` (boolean, optional, default true). |
 
 ## Features
 
-- **Core Tools**:
-  - `google_search`: Search the web via Google Custom Search API. Returns ranked URLs with optional recency filtering (`day`, `week`, `month`, `year`).
-  - `scrape_page`: Extract text content from any web page or YouTube video transcript. Uses a tiered scraping strategy: fast static HTML extraction first (CheerioCrawler), with automatic Playwright/Chromium fallback for JavaScript-rendered pages (React, Next.js, SPAs).
-  - `search_and_scrape`: Composite tool — searches Google, scrapes the top results in parallel, and returns combined raw content with source attribution. Ideal for gathering information from multiple sources in a single call.
-- **JavaScript Rendering**:
-  - **Tiered Scraping**: Static pages are scraped instantly with CheerioCrawler. JavaScript-heavy sites (React, Next.js, SPAs) automatically fall back to Playwright/Chromium for full DOM rendering.
-  - **Zero Configuration**: Chromium is installed as part of setup — no manual browser management required.
-- **YouTube Transcript Extraction**:
-  - **Robust extraction with comprehensive error handling**: 10 distinct error types with clear, actionable messages.
-  - **Intelligent retry logic with exponential backoff**: Automatic retries for transient failures (network issues, rate limiting, timeouts).
-  - **User-friendly error messages and diagnostics**: Clear feedback when transcript extraction fails, with specific reasons.
-- **Advanced Caching System**:
-  - **Two-Layer Cache**: Combines a fast in-memory cache for immediate access with a persistent disk-based cache for durability.
-  - **Custom Namespaces**: Organizes cached data by tool, preventing collisions and simplifying management.
-  - **Manual & Automated Persistence**: Offers both automatic, time-based cache saving and manual persistence via a secure API endpoint.
-- **Robust Performance & Reliability**:
-  - **Comprehensive Timeouts**: Protects against network issues and slow responses from external APIs.
-  - **Graceful Degradation**: Ensures the server remains responsive even if a tool or dependency fails.
-  - **Dual Transport Protocols**: Supports both `STDIO` for local process communication and `HTTP+SSE` for web-based clients.
-- **Enterprise-Grade Security**:
-  - **OAuth 2.1 Protection**: Secures all HTTP endpoints with modern, industry-standard authorization.
-  - **Granular Scopes**: Provides fine-grained control over access to tools and administrative functions.
-- **Monitoring & Management**:
-  - **Administrative API**: Exposes endpoints for monitoring cache statistics, managing the cache, and inspecting the event store.
+- **Tiered Web Scraping**: Fast static HTML extraction (CheerioCrawler), with automatic Playwright/Chromium fallback for JavaScript-rendered pages. Zero configuration — Chromium is installed as part of setup.
+- **YouTube Transcript Extraction**: Robust extraction with 10 classified error types, automatic retries with exponential backoff for transient failures, and clear actionable error messages. See the [full documentation](./docs/youtube-transcript-extraction.md).
+- **Persistent Caching**: Two-layer cache (in-memory + disk) with per-tool namespaces. Reduces latency on repeated queries and minimizes Google API costs. Manual and automated persistence via the [Management API](#management-api).
+- **Dual Transport**: STDIO for local MCP clients, HTTP+SSE for web applications and multi-client setups.
+- **Enterprise Security**: OAuth 2.1 with JWT validation, granular scopes, and SSRF protection for scraping.
+- **Graceful Degradation**: Comprehensive timeouts, resilient multi-source scraping (`Promise.allSettled`), and automatic error recovery.
+- **Monitoring**: Administrative endpoints for cache stats, event store stats, and cache management.
 
 ## System Architecture
-
-The server is built on a layered architecture designed for clarity, separation of concerns, and extensibility.
 
 ```mermaid
 graph TD
@@ -122,48 +134,18 @@ graph TD
     style L fill:#f99,stroke:#333,stroke-width:2px
 ```
 
-For a more detailed explanation, see the [**Full Architecture Guide**](./docs/architecture/architecture.md).
-
-## YouTube Transcript Extraction
-
-The server includes a robust YouTube transcript extraction system that provides reliable access to video transcripts with comprehensive error handling and automatic recovery mechanisms.
-
-### Key Features
-
-- **Comprehensive Error Classification**: Identifies 10 distinct error types with clear, actionable messages
-- **Intelligent Retry Logic**: Exponential backoff mechanism for transient failures (max 3 attempts)
-- **Production Optimizations**: 91% performance improvement and 80% log reduction
-- **User-Friendly Feedback**: Clear error messages explaining why transcript extraction failed
-
-### Error Handling & Retries
-
-The system classifies 10 distinct error types (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`, `NETWORK_ERROR`) with clear, actionable messages. Transient errors (`NETWORK_ERROR`, `RATE_LIMITED`, `TIMEOUT`) are automatically retried up to 3 times with exponential backoff.
-
-For the full error codes table, retry behavior details, and example error messages, see the [YouTube Transcript Extraction Documentation](./docs/youtube-transcript-extraction.md).
+For a detailed explanation, see the [Architecture Guide](./docs/architecture/architecture.md).
 
 ## Getting Started
 
-### Quick Start
-
-Get the server running locally in three steps:
-
-```bash
-git clone https://github.com/zoharbabin/google-research-mcp.git && cd google-researcher-mcp
-npm install && npx playwright install chromium
-cp .env.example .env   # Then add your Google API keys to .env
-npm run dev            # Server is now running on STDIO transport
-```
-
-> **Note:** This starts the server in STDIO mode, which is all you need for local AI assistant integrations (Claude Code, Cline, Roo Code). HTTP transport with OAuth is only required for web-based or multi-client setups — see [Choosing a Transport](#choosing-a-transport).
-
 ### Prerequisites
 
-- **Node.js**: Version 20.0.0 or higher.
-- **Chromium** (for JavaScript rendering): Installed automatically via `npx playwright install chromium` during setup.
-- **API Keys**:
-  - [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction)
-  - [Google Custom Search Engine ID](https://programmablesearchengine.google.com/)
-- **OAuth 2.1 Provider** (HTTP transport only — not needed for STDIO): An external authorization server (e.g., Auth0, Okta) to issue JWTs.
+- **Node.js** 20.0.0 or higher
+- **Google API Keys**:
+  - [Custom Search API Key](https://developers.google.com/custom-search/v1/introduction)
+  - [Custom Search Engine ID](https://programmablesearchengine.google.com/)
+- **Chromium** (for JavaScript rendering): Installed automatically via `npx playwright install chromium`
+- **OAuth 2.1 Provider** (HTTP transport only): An external authorization server (e.g., Auth0, Okta) to issue JWTs. Not needed for STDIO.
 
 ### Installation & Setup
 
@@ -180,23 +162,19 @@ npm run dev            # Server is now running on STDIO transport
     ```
 
 3.  **Configure Environment Variables**:
-    Create a `.env` file by copying the example and filling in your credentials.
     ```bash
     cp .env.example .env
     ```
-    Now, open `.env` in your editor and add your Google API keys. OAuth configuration is only needed if you plan to use HTTP transport — you can skip it for STDIO. See the comments in `.env.example` for detailed explanations of each variable.
+    Open `.env` and add your Google API keys. All other variables are optional — see the comments in `.env.example` for detailed explanations.
 
 ### Running the Server
 
--   **Development Mode**:
-    For development with automatic reloading on file changes, use:
+-   **Development** (auto-reload on file changes):
     ```bash
     npm run dev
     ```
-    This command uses `tsx` to watch for changes and restart the server.
 
--   **Production Mode**:
-    First, build the TypeScript project into JavaScript, then start the server:
+-   **Production**:
     ```bash
     npm run build
     npm start
@@ -204,13 +182,11 @@ npm run dev            # Server is now running on STDIO transport
 
 ### Running with Docker
 
-Build the image and run with your API keys passed at runtime via `--env-file`:
-
 ```bash
 # Build the image
 docker build -t google-researcher-mcp .
 
-# Run in stdio mode (default, for MCP clients)
+# Run in STDIO mode (default, for MCP clients)
 docker run -i --rm --env-file .env google-researcher-mcp
 
 # Run with HTTP transport on port 3000
@@ -218,14 +194,12 @@ docker run -i --rm --env-file .env google-researcher-mcp
 docker run -d --rm --env-file .env -e MCP_TEST_MODE= -p 3000:3000 google-researcher-mcp
 ```
 
-**Or use Docker Compose** for quick HTTP transport testing:
+**Docker Compose** (quick HTTP transport setup):
 ```bash
 cp .env.example .env   # Fill in your API keys
 docker compose up --build
 curl http://localhost:3000/health
 ```
-
-**Security note:** Never bake secrets into the Docker image. Always pass them at runtime via `--env-file` or individual `-e` flags.
 
 **Docker with Claude Code** (`~/.claude/claude_desktop_config.json`):
 ```json
@@ -239,59 +213,9 @@ curl http://localhost:3000/health
 }
 ```
 
-Upon successful startup, you will see confirmation that the transports are ready:
-```
-✅ stdio transport ready
-🌐 SSE server listening on http://127.0.0.1:3000/mcp
-```
+**Security note:** Never bake secrets into the Docker image. Always pass them at runtime via `--env-file` or `-e` flags.
 
 ## Usage
-
-### Available Tools
-
-The server provides a suite of powerful tools for research and analysis. Each tool is designed with detailed descriptions and annotations to be easily understood and utilized by AI models.
-
-| Tool | Title | Description & Parameters |
-| :--- | :--- | :--- |
-| **`google_search`** | **Google Search** | Searches the web using the Google Custom Search API. Returns URLs. Results are cached for 30 minutes.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 5): Number of results (1-10).<br> - `time_range` (string, optional): Recency filter: `day`, `week`, `month`, `year`. |
-| **`scrape_page`** | **Scrape Page** | Extracts text from web pages (static and JavaScript-rendered) and YouTube video transcripts. Uses CheerioCrawler for static HTML, with automatic Playwright fallback for JS-heavy sites. Features SSRF protection, 10 YouTube error types with retry logic, and exponential backoff. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL to scrape (max 2048 chars). YouTube URLs auto-extract transcripts. |
-| **`search_and_scrape`** | **Search and Scrape** | Composite tool: searches Google for a query, scrapes the top results in parallel with graceful degradation (`Promise.allSettled`), and returns the combined raw content with source attribution. Useful when you need content from multiple sources in one call.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 3): Number of URLs to search and scrape (1-10).<br> - `include_sources` (boolean, optional, default: true): Append numbered source URL list. |
-
-### Quick Start with npx
-
-You can run the server directly via `npx` without cloning the repository. This is the easiest way to integrate with MCP-compatible clients.
-
-**Claude Code** (`~/.claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "google-researcher": {
-      "command": "npx",
-      "args": ["-y", "google-researcher-mcp"],
-      "env": {
-        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
-        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
-      }
-    }
-  }
-}
-```
-
-**Roo Code / Cline** (MCP settings):
-```json
-{
-  "mcpServers": {
-    "google-researcher": {
-      "command": "npx",
-      "args": ["-y", "google-researcher-mcp"],
-      "env": {
-        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
-        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
-      }
-    }
-  }
-}
-```
 
 ### Choosing a Transport
 
@@ -302,12 +226,11 @@ You can run the server directly via `npx` without cloning the repository. This i
 | **Setup** | Zero config — just provide API keys | Requires OAuth provider (Auth0, Okta, etc.) |
 | **Scaling** | One server per client process | Single server, many concurrent clients |
 
-**Recommendation**: Use **STDIO** for local AI assistant integrations. Use **HTTP+SSE** when you need to expose the server as a shared service or integrate with web applications.
+**Recommendation**: Use **STDIO** for local AI assistant integrations. Use **HTTP+SSE** only when you need a shared service or web application integration.
 
 ### Client Integration
 
 #### STDIO Client (Local Process)
-Ideal for local tools and CLI applications.
 
 ```javascript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -317,123 +240,85 @@ const transport = new StdioClientTransport({
   command: "node",
   args: ["dist/server.js"]
 });
-const client = new Client({ name: "test-client" });
+const client = new Client({ name: "my-client" });
 await client.connect(transport);
 
-const result = await client.callTool({
+// Search Google
+const searchResult = await client.callTool({
   name: "google_search",
   arguments: { query: "Model Context Protocol" }
 });
-console.log(result.content[0].text);
+console.log(searchResult.content[0].text);
 
-// YouTube transcript extraction example
-const youtubeResult = await client.callTool({
+// Extract a YouTube transcript
+const transcript = await client.callTool({
   name: "scrape_page",
   arguments: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
 });
-console.log(youtubeResult.content[0].text);
+console.log(transcript.content[0].text);
 ```
 
 #### HTTP+SSE Client (Web Application)
-Suitable for web-based clients. Requires a valid OAuth 2.1 Bearer token.
+
+Requires a valid OAuth 2.1 Bearer token from your configured authorization server.
 
 ```javascript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-// The client MUST obtain a valid OAuth 2.1 Bearer token from your
-// configured external Authorization Server before making requests.
 const transport = new StreamableHTTPClientTransport(
   new URL("http://localhost:3000/mcp"),
   {
     getAuthorization: async () => `Bearer YOUR_ACCESS_TOKEN`
   }
 );
-const client = new Client({ name: "test-client" });
+const client = new Client({ name: "my-client" });
 await client.connect(transport);
 
 const result = await client.callTool({
-  name: "google_search",
-  arguments: { query: "Model Context Protocol" }
+  name: "search_and_scrape",
+  arguments: { query: "Model Context Protocol", num_results: 3 }
 });
 console.log(result.content[0].text);
-
-// YouTube transcript extraction with error handling
-try {
-  const youtubeResult = await client.callTool({
-    name: "scrape_page",
-    arguments: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
-  });
-  console.log("Transcript:", youtubeResult.content[0].text);
-} catch (error) {
-  if (error.content && error.content[0].text.includes("TRANSCRIPT_DISABLED")) {
-    console.log("Video owner has disabled transcripts");
-  } else if (error.content && error.content[0].text.includes("VIDEO_NOT_FOUND")) {
-    console.log("Video not found - check the URL");
-  } else {
-    console.log("Transcript extraction failed:", error.content[0].text);
-  }
-}
 ```
 
 ### Management API
 
-The server provides several administrative and operational endpoints.
+Administrative and monitoring endpoints (HTTP transport only):
 
-| Method | Endpoint                 | Description                             | Required Scope               |
-|--------|--------------------------|-----------------------------------------|------------------------------|
-| `GET`  | `/health`                | Server health check (status, version, uptime). | Public (unauthenticated) |
-| `GET`  | `/version`               | Server version and runtime info.        | Public (unauthenticated)     |
-| `GET`  | `/mcp/cache-stats`       | View cache performance statistics.      | `mcp:admin:cache:read`       |
-| `GET`  | `/mcp/event-store-stats` | View event store usage statistics.      | `mcp:admin:event-store:read` |
-| `POST` | `/mcp/cache-invalidate`  | Clear specific cache entries.           | `mcp:admin:cache:invalidate` |
-| `POST` | `/mcp/cache-persist`     | Force the cache to be saved to disk.    | `mcp:admin:cache:persist`    |
-| `GET`  | `/mcp/oauth-scopes`      | Get documentation for all OAuth scopes. | Public                       |
-| `GET`  | `/mcp/oauth-config`      | View the server's OAuth configuration.  | `mcp:admin:config:read`      |
-| `GET`  | `/mcp/oauth-token-info`  | View details of the provided token.     | Requires authentication      |
-
-## Performance & Reliability
-
-The server has been optimized for production use with significant performance improvements and reliability enhancements:
-
-### YouTube Transcript Extraction Performance
-- **91% Performance Improvement**: End-to-end tests for YouTube transcript extraction are now 91% faster
-- **80% Log Reduction**: Streamlined logging reduces noise while maintaining diagnostic capabilities
-- **Production Controls**: Environment-based configuration allows fine-tuning of retry behavior and timeouts
-
-### System Reliability
-- **Intelligent Error Recovery**: Automatic retry with exponential backoff for transient failures
-- **Graceful Degradation**: The system continues operating even when individual components encounter issues
-- **Comprehensive Error Classification**: 10 distinct error types provide precise feedback for troubleshooting
-- **Resource Optimization**: Efficient memory and CPU usage patterns for high-volume operations
-
-### Monitoring & Diagnostics
-- **Enhanced Logging**: Detailed but efficient logging for production debugging
-- **Performance Metrics**: Built-in performance tracking for all major operations
-- **Error Analytics**: Structured error reporting for operational insights
-
-These optimizations ensure the server can handle production workloads efficiently while providing reliable service even under adverse conditions.
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/health` | Server health check (status, version, uptime) | Public |
+| `GET` | `/version` | Server version and runtime info | Public |
+| `GET` | `/mcp/cache-stats` | Cache performance statistics | `mcp:admin:cache:read` |
+| `GET` | `/mcp/event-store-stats` | Event store usage statistics | `mcp:admin:event-store:read` |
+| `POST` | `/mcp/cache-invalidate` | Clear specific cache entries | `mcp:admin:cache:invalidate` |
+| `POST` | `/mcp/cache-persist` | Force cache save to disk | `mcp:admin:cache:persist` |
+| `GET` | `/mcp/oauth-config` | Current OAuth configuration | `mcp:admin:config:read` |
+| `GET` | `/mcp/oauth-scopes` | OAuth scopes documentation | Public |
+| `GET` | `/mcp/oauth-token-info` | Token details | Authenticated |
 
 ## Security
 
 ### OAuth 2.1 Authorization
 
-The server implements OAuth 2.1 authorization for all HTTP-based communication, ensuring that only authenticated and authorized clients can access its capabilities.
+All HTTP endpoints under `/mcp/` (except public documentation) are protected by OAuth 2.1:
 
-- **Protection**: All endpoints under `/mcp/` (except for public documentation endpoints) are protected.
-- **Token Validation**: The server validates JWTs (JSON Web Tokens) against the configured JWKS (JSON Web Key Set) URI from your authorization server.
-- **Scope Enforcement**: Each tool and administrative action is mapped to a specific OAuth scope, providing granular control over permissions.
+- **Token Validation**: JWTs are validated against your authorization server's JWKS endpoint (`${OAUTH_ISSUER_URL}/.well-known/jwks.json`).
+- **Scope Enforcement**: Each tool and admin action requires a specific OAuth scope.
 
-To set up OAuth, configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in your `.env` file to point at your authorization server (e.g., Auth0, Okta). The server validates JWTs against the issuer's JWKS endpoint. See `.env.example` for detailed variable descriptions and the [OAuth Scopes](#available-scopes) section below.
+Configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in `.env`. See `.env.example` for details.
+
+> **STDIO users**: OAuth is not used for STDIO transport. You can skip all OAuth configuration.
 
 ### Available Scopes
 
-#### Tool Execution Scopes
+**Tool Execution:**
 - `mcp:tool:google_search:execute`
 - `mcp:tool:scrape_page:execute`
 - `mcp:tool:search_and_scrape:execute`
 
-#### Administrative Scopes
+**Administration:**
 - `mcp:admin:cache:read`
 - `mcp:admin:cache:invalidate`
 - `mcp:admin:cache:persist`
@@ -442,51 +327,43 @@ To set up OAuth, configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in your `.env
 
 ## Testing
 
-The project maintains a high standard of quality through a combination of end-to-end and focused component tests.
-
-| Script                | Description                                                              |
-| --------------------- | ------------------------------------------------------------------------ |
-| `npm test`            | Runs all focused component tests (`*.spec.ts`) using Jest.               |
-| `npm run test:e2e`    | Executes the full end-to-end test suite for both STDIO and SSE transports. |
-| `npm run test:coverage` | Generates a detailed code coverage report.                               |
-
-For more details on the testing philosophy and structure, see the [**Testing Guide**](./docs/testing-guide.md).
-
-### NPM Scripts Quick Reference
-
-| Script | When to Use |
+| Script | Description |
 |--------|-------------|
-| `npm start` | Run the built server (production). |
-| `npm run dev` | Start with live-reload during development. |
-| `npm run build` | Compile TypeScript to `dist/`. |
-| `npm test` | Run all unit/component tests (Jest). |
-| `npm run test:coverage` | Generate a code coverage report. |
-| `npm run test:e2e` | Run full end-to-end suite (STDIO + HTTP + YouTube). |
-| `npm run test:e2e:stdio` | Run only the STDIO transport E2E test. |
-| `npm run test:e2e:sse` | Run only the HTTP transport E2E test. |
-| `npm run test:e2e:youtube` | Run only the YouTube transcript E2E test. |
+| `npm test` | Run all unit/component tests (Jest) |
+| `npm run test:e2e` | Full end-to-end suite (STDIO + HTTP + YouTube) |
+| `npm run test:coverage` | Generate code coverage report |
+| `npm run test:e2e:stdio` | STDIO transport E2E only |
+| `npm run test:e2e:sse` | HTTP transport E2E only |
+| `npm run test:e2e:youtube` | YouTube transcript E2E only |
+
+**All NPM scripts:**
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Run the built server (production) |
+| `npm run dev` | Start with live-reload (development) |
+| `npm run build` | Compile TypeScript to `dist/` |
+
+For testing philosophy and structure, see the [Testing Guide](./docs/testing-guide.md).
 
 ## Troubleshooting
 
-- **Server won't start**: Ensure the required environment variables `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ID` are set. The server will exit with a clear error if any are missing. Run `node dist/server.js` directly to see the startup error.
-- **Empty scrape results**: If `scrape_page` returns empty content, the persistent cache may contain stale entries. Delete `storage/persistent_cache/namespaces/scrapePage/` and restart the server to force fresh scrapes.
-- **Playwright/Chromium errors**: If Chromium fails to launch, re-run `npx playwright install chromium`. On Linux, you may also need system dependencies: `npx playwright install-deps chromium`. In Docker, these are pre-installed in the image.
-- **Port 3000 already in use**: Another process is using the HTTP port. Either stop the other process (`lsof -ti:3000 | xargs kill`) or set a different port with `PORT=3001 npm start`.
-- **YouTube transcripts fail**: Some videos have transcripts disabled by their owner. The error message will indicate the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`). See the [error types table](#supported-error-types) for all codes.
-- **Cache issues**: Use the `/mcp/cache-stats` endpoint to inspect cache health, or `/mcp/cache-persist` to force a disk save. See the [Management API](#management-api) table for all administrative endpoints.
-- **OAuth errors**: Verify `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in your `.env` file. The server fetches JWKS from `${OAUTH_ISSUER_URL}/.well-known/jwks.json`. Use `/mcp/oauth-config` to inspect the current configuration.
-- **Docker health check failing**: The health check uses `wget` to hit `/health` on port 3000. This only works in HTTP transport mode (`MCP_TEST_MODE=` must be unset). In STDIO mode, the health check will fail — this is expected.
+- **Server won't start**: Ensure `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ID` are set in `.env`. The server exits with a clear error if either is missing.
+- **Empty scrape results**: The persistent cache may contain stale entries. Delete `storage/persistent_cache/namespaces/scrapePage/` and restart to force fresh scrapes.
+- **Playwright/Chromium errors**: Re-run `npx playwright install chromium`. On Linux, also run `npx playwright install-deps chromium` for system dependencies. In Docker, these are pre-installed.
+- **Port 3000 in use**: Stop the other process (`lsof -ti:3000 | xargs kill`) or set `PORT=3001 npm start`.
+- **YouTube transcripts fail**: Some videos have transcripts disabled by the owner. The error message includes the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`). See the [YouTube Transcript Documentation](./docs/youtube-transcript-extraction.md) for all error codes.
+- **Cache issues**: Use `/mcp/cache-stats` to inspect cache health, or `/mcp/cache-persist` to force a save. See the [Management API](#management-api).
+- **OAuth errors**: Verify `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in `.env`. Use `/mcp/oauth-config` to inspect current configuration.
+- **Docker health check failing**: The health check hits `/health` on port 3000, which requires HTTP transport. In STDIO mode (`MCP_TEST_MODE=stdio`), the health check will fail — this is expected.
+
+## Roadmap
+
+Feature requests and improvements are tracked as [GitHub Issues](https://github.com/zoharbabin/google-research-mcp/issues). Contributions welcome.
 
 ## Contributing
 
-We welcome contributions of all kinds! This project is open-source under the MIT license and we believe in the power of community collaboration.
-
-- ⭐ **Star** this repo if you find it useful.
-- 🍴 **Fork** it to create your own version.
-- 💡 **Report issues** if you find bugs or have suggestions for improvements.
-- 🚀 **Submit PRs** for bug fixes, new features, or documentation enhancements.
-
-To contribute code, please follow our [**Contribution Guidelines**](./docs/CONTRIBUTING.md).
+We welcome contributions of all kinds! Please see the [Contribution Guidelines](./docs/CONTRIBUTING.md) for details.
 
 ## License
 
