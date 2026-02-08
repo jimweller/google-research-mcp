@@ -49,11 +49,14 @@
 ## Features
 
 - **Core Tools**:
-  - `google_search`: Find URLs using the Google Custom Search API, with recency filtering.
-  - `scrape_page`: Extract text from web pages and YouTube video transcripts.
-  - `search_and_scrape`: Composite tool — searches Google, scrapes the top results in parallel, and returns combined raw content with source attribution.
+  - `google_search`: Search the web via Google Custom Search API. Returns ranked URLs with optional recency filtering (`day`, `week`, `month`, `year`).
+  - `scrape_page`: Extract text content from any web page or YouTube video transcript. Uses a tiered scraping strategy: fast static HTML extraction first (CheerioCrawler), with automatic Playwright/Chromium fallback for JavaScript-rendered pages (React, Next.js, SPAs).
+  - `search_and_scrape`: Composite tool — searches Google, scrapes the top results in parallel, and returns combined raw content with source attribution. Ideal for gathering information from multiple sources in a single call.
+- **JavaScript Rendering**:
+  - **Tiered Scraping**: Static pages are scraped instantly with CheerioCrawler. JavaScript-heavy sites (React, Next.js, SPAs) automatically fall back to Playwright/Chromium for full DOM rendering.
+  - **Zero Configuration**: Chromium is installed as part of setup — no manual browser management required.
 - **YouTube Transcript Extraction**:
-  - **Robust YouTube transcript extraction with comprehensive error handling**: 10 distinct error types with clear, actionable messages.
+  - **Robust extraction with comprehensive error handling**: 10 distinct error types with clear, actionable messages.
   - **Intelligent retry logic with exponential backoff**: Automatic retries for transient failures (network issues, rate limiting, timeouts).
   - **User-friendly error messages and diagnostics**: Clear feedback when transcript extraction fails, with specific reasons.
 - **Advanced Caching System**:
@@ -233,6 +236,13 @@ docker run -i --rm --env-file .env google-researcher-mcp
 docker run -d --rm --env-file .env -e MCP_TEST_MODE= -p 3000:3000 google-researcher-mcp
 ```
 
+**Or use Docker Compose** for quick HTTP transport testing:
+```bash
+cp .env.example .env   # Fill in your API keys
+docker compose up --build
+curl http://localhost:3000/health
+```
+
 **Security note:** Never bake secrets into the Docker image. Always pass them at runtime via `--env-file` or individual `-e` flags.
 
 **Docker with Claude Code** (`~/.claude/claude_desktop_config.json`):
@@ -262,7 +272,7 @@ The server provides a suite of powerful tools for research and analysis. Each to
 | Tool | Title | Description & Parameters |
 | :--- | :--- | :--- |
 | **`google_search`** | **Google Search** | Searches the web using the Google Custom Search API. Returns URLs. Results are cached for 30 minutes.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 5): Number of results (1-10).<br> - `time_range` (string, optional): Recency filter: `day`, `week`, `month`, `year`. |
-| **`scrape_page`** | **Scrape Page** | Extracts text from web pages and YouTube video transcripts. Features SSRF protection, 10 YouTube error types with retry logic, and exponential backoff. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL to scrape (max 2048 chars). YouTube URLs auto-extract transcripts. |
+| **`scrape_page`** | **Scrape Page** | Extracts text from web pages (static and JavaScript-rendered) and YouTube video transcripts. Uses CheerioCrawler for static HTML, with automatic Playwright fallback for JS-heavy sites. Features SSRF protection, 10 YouTube error types with retry logic, and exponential backoff. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL to scrape (max 2048 chars). YouTube URLs auto-extract transcripts. |
 | **`search_and_scrape`** | **Search and Scrape** | Composite tool: searches Google for a query, scrapes the top results in parallel with graceful degradation (`Promise.allSettled`), and returns the combined raw content with source attribution. Useful when you need content from multiple sources in one call.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 3): Number of URLs to search and scrape (1-10).<br> - `include_sources` (boolean, optional, default: true): Append numbered source URL list. |
 
 ### Quick Start with npx
@@ -300,6 +310,17 @@ You can run the server directly via `npx` without cloning the repository. This i
   }
 }
 ```
+
+### Choosing a Transport
+
+| | STDIO | HTTP+SSE |
+|---|---|---|
+| **Best for** | Local MCP clients (Claude Code, Cline, Roo Code) | Web apps, multi-client setups, remote access |
+| **Auth** | None needed (process-level isolation) | OAuth 2.1 Bearer tokens required |
+| **Setup** | Zero config — just provide API keys | Requires OAuth provider (Auth0, Okta, etc.) |
+| **Scaling** | One server per client process | Single server, many concurrent clients |
+
+**Recommendation**: Use **STDIO** for local AI assistant integrations. Use **HTTP+SSE** when you need to expose the server as a shared service or integrate with web applications.
 
 ### Client Integration
 
@@ -421,7 +442,7 @@ The server implements OAuth 2.1 authorization for all HTTP-based communication, 
 - **Token Validation**: The server validates JWTs (JSON Web Tokens) against the configured JWKS (JSON Web Key Set) URI from your authorization server.
 - **Scope Enforcement**: Each tool and administrative action is mapped to a specific OAuth scope, providing granular control over permissions.
 
-For a complete guide on setting up OAuth, see the [**Security Configuration Guide**](./docs/plans/security-improvements-implementation-guide.md).
+To set up OAuth, configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in your `.env` file to point at your authorization server (e.g., Auth0, Okta). The server validates JWTs against the issuer's JWKS endpoint. See `.env.example` for detailed variable descriptions and the [OAuth Scopes](#available-scopes) section below.
 
 ### Available Scopes
 
@@ -465,10 +486,14 @@ For more details on the testing philosophy and structure, see the [**Testing Gui
 
 ## Troubleshooting
 
-- **Server won't start**: Ensure all required environment variables (`GOOGLE_CUSTOM_SEARCH_API_KEY`, `GOOGLE_CUSTOM_SEARCH_ID`) are set. The server will exit with a clear error if any are missing.
-- **YouTube transcripts fail**: Some videos have transcripts disabled by their owner. The error message will indicate the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`).
+- **Server won't start**: Ensure the required environment variables `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ID` are set. The server will exit with a clear error if any are missing. Run `node dist/server.js` directly to see the startup error.
+- **Empty scrape results**: If `scrape_page` returns empty content, the persistent cache may contain stale entries. Delete `storage/persistent_cache/namespaces/scrapePage/` and restart the server to force fresh scrapes.
+- **Playwright/Chromium errors**: If Chromium fails to launch, re-run `npx playwright install chromium`. On Linux, you may also need system dependencies: `npx playwright install-deps chromium`. In Docker, these are pre-installed in the image.
+- **Port 3000 already in use**: Another process is using the HTTP port. Either stop the other process (`lsof -ti:3000 | xargs kill`) or set a different port with `PORT=3001 npm start`.
+- **YouTube transcripts fail**: Some videos have transcripts disabled by their owner. The error message will indicate the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`). See the [error types table](#supported-error-types) for all codes.
 - **Cache issues**: Use the `/mcp/cache-stats` endpoint to inspect cache health, or `/mcp/cache-persist` to force a disk save. See the [Management API](#management-api) table for all administrative endpoints.
-- **OAuth errors**: Verify your JWKS URI, issuer, and audience settings in the `.env` file. Use `/mcp/oauth-config` to inspect the current configuration.
+- **OAuth errors**: Verify `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in your `.env` file. The server fetches JWKS from `${OAUTH_ISSUER_URL}/.well-known/jwks.json`. Use `/mcp/oauth-config` to inspect the current configuration.
+- **Docker health check failing**: The health check uses `wget` to hit `/health` on port 3000. This only works in HTTP transport mode (`MCP_TEST_MODE=` must be unset). In STDIO mode, the health check will fail — this is expected.
 
 ## Contributing
 

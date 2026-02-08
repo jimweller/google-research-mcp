@@ -32,6 +32,7 @@ We are committed to fostering an open and welcoming environment. All contributor
 3.  **Install Dependencies**:
     ```bash
     npm install
+    npx playwright install chromium
     ```
 
 4.  **Configure Your Environment**:
@@ -61,7 +62,7 @@ We are committed to fostering an open and welcoming environment. All contributor
     - Ensure your code is covered by tests.
 
 3.  **Run Tests**:
-    Before submitting, ensure all tests pass.
+    Before submitting, ensure all tests pass. PRs that introduce new functionality should include corresponding tests.
     ```bash
     npm test
     ```
@@ -69,6 +70,7 @@ We are committed to fostering an open and welcoming environment. All contributor
     ```bash
     npm run test:coverage
     ```
+    For the full testing philosophy and structure, see the [**Testing Guide**](./testing-guide.md).
 
 4.  **Commit Your Changes**:
     Use a clear and descriptive commit message. We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
@@ -93,13 +95,15 @@ When you're ready, open a pull request from your fork to the main repository.
 ## Coding and Style Guidelines
 
 - **TypeScript**: We use TypeScript for type safety. Please include types for all new code.
-- **Code Style**: Follow the existing code conventions. The project does not currently use ESLint or Prettier — contributions to add them are welcome.
+- **Code Style**: Follow the existing code conventions in the codebase.
 - **Error Handling**: All functions should handle potential errors gracefully.
 
 ## Documentation Standards
 
 - If you add a new feature, please document it in the `README.md` or relevant files in the `docs/` directory.
 - If you change existing functionality, update the corresponding documentation.
+- New MCP tools must include detailed descriptions, parameter annotations, and a title — see the existing tools in `src/server.ts` for the expected metadata format.
+- Add an entry to `docs/CHANGELOG.md` under the `[Unreleased]` section for any user-facing change.
 
 ## Versioning and Changelog
 

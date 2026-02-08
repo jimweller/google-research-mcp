@@ -114,7 +114,7 @@ const canExecuteScrapePage = hasRequiredScopes(tokenScopes, [TOOL_SCOPES.SCRAPE_
 
 - [OAuth 2.1 Draft Specification](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-07)
 - [OAuth 2.0 Bearer Token Usage (RFC 6750)](https://tools.ietf.org/html/rfc6750)
-- [MCP Server Security Improvements Implementation Guide](../plans/security-improvements-implementation-guide.md)
+- [MCP Server README — OAuth 2.1 Authorization](../../README.md#oauth-21-authorization)
 `;
 }
 

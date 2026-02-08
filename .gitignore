@@ -51,6 +51,7 @@ setup_roo_project.sh
 
 # Runtime storage (cache, event store, etc.)
 /storage/
+qdrant_storage/
 
 # Temporary files
 *.tmp
