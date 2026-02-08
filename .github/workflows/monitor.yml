@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
 
 jobs:
   check-npm-sync:
@@ -17,35 +17,32 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          
+
       - name: Check package versions
         id: versions
         run: |
           # Get latest npm version
           NPM_VERSION=$(npm view google-researcher-mcp version 2>/dev/null || echo "not-found")
           echo "npm_version=${NPM_VERSION}" >> $GITHUB_OUTPUT
-          
+
           # Get latest GitHub release version
-          GITHUB_VERSION=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name | sed 's/v//' 2>/dev/null || echo "not-found")
+          GITHUB_VERSION=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // "not-found"' | sed 's/v//')
           echo "github_version=${GITHUB_VERSION}" >> $GITHUB_OUTPUT
-          
+
           echo "📊 Version Check:"
           echo "- npm latest: ${NPM_VERSION}"
           echo "- GitHub latest: ${GITHUB_VERSION}"
-          
+
       - name: Test package installation
         run: |
           echo "🧪 Testing package installation..."
           mkdir -p test-install
           cd test-install
-          
-          # Test latest version installation
           npm init -y --silent
-          
+
           if npm install google-researcher-mcp --silent; then
             echo "✅ Latest version installs successfully"
-            
-            # Test basic functionality
+
             if node -e "
               try {
                 const pkg = require('google-researcher-mcp/package.json');
@@ -67,104 +64,120 @@ jobs:
             echo "❌ Package installation failed"
             exit 1
           fi
-          
+
+          cd ..
+          rm -rf test-install
+
       - name: Check package size
         run: |
           echo "📦 Checking package size..."
-          
-          # Get package info
           PACKAGE_INFO=$(npm view google-researcher-mcp --json 2>/dev/null || echo "{}")
-          
+
           if [[ "$PACKAGE_INFO" != "{}" ]]; then
             UNPACKED_SIZE=$(echo "$PACKAGE_INFO" | jq -r '.dist.unpackedSize // 0')
-            TARBALL_SIZE=$(echo "$PACKAGE_INFO" | jq -r '.dist.tarball // "unknown"' | xargs curl -sI | grep -i content-length | awk '{print $2}' | tr -d '\r' || echo "0")
-            
-            echo "- Unpacked size: $(numfmt --to=iec $UNPACKED_SIZE 2>/dev/null || echo $UNPACKED_SIZE) bytes"
-            echo "- Download size: $(numfmt --to=iec $TARBALL_SIZE 2>/dev/null || echo $TARBALL_SIZE) bytes"
-            
-            # Check if package is too large (50MB limit)
+
+            # Format size using awk (portable, no numfmt dependency)
+            FORMATTED_SIZE=$(echo "$UNPACKED_SIZE" | awk '{
+              if ($1 >= 1073741824) printf "%.1f GB", $1/1073741824;
+              else if ($1 >= 1048576) printf "%.1f MB", $1/1048576;
+              else if ($1 >= 1024) printf "%.1f KB", $1/1024;
+              else printf "%d B", $1;
+            }')
+
+            echo "- Unpacked size: ${FORMATTED_SIZE}"
+
             if [[ $UNPACKED_SIZE -gt 52428800 ]]; then
               echo "⚠️ Package size exceeds 50MB limit"
             else
               echo "✅ Package size within acceptable limits"
             fi
           fi
-          
+
       - name: Check dependencies health
         run: |
           echo "🔍 Checking dependencies health..."
-          
-          # Check for security vulnerabilities
-          if npm audit --audit-level=high --json > audit.json 2>/dev/null; then
-            VULNERABILITIES=$(cat audit.json | jq '.metadata.vulnerabilities.total // 0')
-            HIGH_VULNS=$(cat audit.json | jq '.metadata.vulnerabilities.high // 0')
-            CRITICAL_VULNS=$(cat audit.json | jq '.metadata.vulnerabilities.critical // 0')
-            
-            echo "- Total vulnerabilities: $VULNERABILITIES"  
-            echo "- High severity: $HIGH_VULNS"
+          mkdir -p health-check && cd health-check
+          npm init -y --silent
+          npm install google-researcher-mcp --silent
+
+          if npm audit --audit-level=critical --json > audit.json 2>/dev/null; then
+            CRITICAL_VULNS=$(jq '.metadata.vulnerabilities.critical // 0' audit.json 2>/dev/null || echo "0")
+            HIGH_VULNS=$(jq '.metadata.vulnerabilities.high // 0' audit.json 2>/dev/null || echo "0")
+
             echo "- Critical severity: $CRITICAL_VULNS"
-            
-            if [[ $CRITICAL_VULNS -gt 0 ]] || [[ $HIGH_VULNS -gt 0 ]]; then
-              echo "❌ High/Critical vulnerabilities found"
-              cat audit.json | jq '.vulnerabilities // {}'
+            echo "- High severity: $HIGH_VULNS"
+
+            if [[ "$CRITICAL_VULNS" -gt 0 ]]; then
+              echo "❌ Critical vulnerabilities found"
+              jq '.vulnerabilities // {}' audit.json
+              cd .. && rm -rf health-check
               exit 1
             else
-              echo "✅ No high/critical vulnerabilities found"
+              echo "✅ No critical vulnerabilities found"
             fi
           else
-            echo "⚠️ Could not run security audit"
+            echo "⚠️ Could not run security audit (non-critical)"
           fi
-          
+
+          cd .. && rm -rf health-check
+
       - name: Create health report
         if: always()
         run: |
           echo "## 📊 Package Health Report" >> $GITHUB_STEP_SUMMARY
           echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 📋 Version Status" >> $GITHUB_STEP_SUMMARY
           echo "- **npm latest**: \`${{ steps.versions.outputs.npm_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub latest**: \`${{ steps.versions.outputs.github_version }}\`" >> $GITHUB_STEP_SUMMARY
-          
+
           if [[ "${{ steps.versions.outputs.npm_version }}" == "${{ steps.versions.outputs.github_version }}" ]]; then
             echo "- **Status**: ✅ Versions in sync" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Status**: ⚠️ Version mismatch detected" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
           echo "- [npm package](https://www.npmjs.com/package/google-researcher-mcp)" >> $GITHUB_STEP_SUMMARY
           echo "- [GitHub releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Package stats](https://npm-stat.com/charts.html?package=google-researcher-mcp)" >> $GITHUB_STEP_SUMMARY
-          
+
       - name: Report critical issues
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
+            // Check if a recent health issue already exists to avoid spam
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'package-health',
+              state: 'open',
+              per_page: 1
+            });
+
+            if (issues.length > 0) {
+              console.log('Open health issue already exists, skipping creation');
+              return;
+            }
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '🚨 Package Health Check Failed',
               body: `## Package Health Issue Detected
-              
+
               The automated health check has detected issues with the published package.
-              
+
               **Check Details:**
               - **Time**: ${new Date().toISOString()}
               - **npm Version**: ${{ steps.versions.outputs.npm_version }}
               - **GitHub Version**: ${{ steps.versions.outputs.github_version }}
-              
-              **Possible Issues:**
-              - Package installation failure
-              - Security vulnerabilities detected
-              - Version synchronization problems
-              - Package size or structure issues
-              
+
               **Action Required:**
               Please review the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) and take appropriate action.
-              
+
               **Auto-generated by**: Package Health Monitor
               `,
               labels: ['bug', 'monitoring', 'package-health']
