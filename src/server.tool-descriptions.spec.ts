@@ -93,7 +93,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage.")
         },
         {
-          title: "Google Web Search - Find relevant web pages and resources",
+          title: "Google Search",
           readOnlyHint: true,
           openWorldHint: true
         },
@@ -107,7 +107,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           num_results: expect.any(Object)
         }),
         expect.objectContaining({
-          title: "Google Web Search - Find relevant web pages and resources",
+          title: "Google Search",
           readOnlyHint: true,
           openWorldHint: true
         }),
@@ -124,7 +124,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           url: z.string().url().describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
         },
         {
-          title: "Web Page & YouTube Content Extractor - Extract text content and transcripts",
+          title: "Scrape Page",
           readOnlyHint: true,
           openWorldHint: true
         },
@@ -137,7 +137,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           url: expect.any(Object)
         }),
         expect.objectContaining({
-          title: "Web Page & YouTube Content Extractor - Extract text content and transcripts",
+          title: "Scrape Page",
           readOnlyHint: true,
           openWorldHint: true
         }),
@@ -155,7 +155,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           model: z.string().default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. Available options: 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support). Use gemini-2.0-flash-001 for speed, gemini-pro for detailed analysis."),
         },
         {
-          title: "Gemini AI Text Analysis - Process and analyze content with advanced AI",
+          title: "Gemini Analysis",
           readOnlyHint: true,
           openWorldHint: false
         },
@@ -169,7 +169,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           model: expect.any(Object)
         }),
         expect.objectContaining({
-          title: "Gemini AI Text Analysis - Process and analyze content with advanced AI",
+          title: "Gemini Analysis",
           readOnlyHint: true,
           openWorldHint: false
         }),
@@ -187,7 +187,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze. More sources provide broader coverage but take longer to process. Recommended range: 2-5 sources for optimal balance of speed and coverage. Use 2-3 for quick research, 4-5 for comprehensive analysis.")
         },
         {
-          title: "Comprehensive Topic Research Workflow - Advanced multi-step research with AI synthesis",
+          title: "Research Topic",
           readOnlyHint: true,
           openWorldHint: true
         },
@@ -201,7 +201,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
           num_results: expect.any(Object)
         }),
         expect.objectContaining({
-          title: "Comprehensive Topic Research Workflow - Advanced multi-step research with AI synthesis",
+          title: "Research Topic",
           readOnlyHint: true,
           openWorldHint: true
         }),
@@ -301,16 +301,16 @@ describe('Enhanced MCP Tool Descriptions', () => {
 
     it('should have descriptive titles for all tools', () => {
       const expectedTitles = {
-        google_search: "Google Web Search - Find relevant web pages and resources",
-        scrape_page: "Web Page & YouTube Content Extractor - Extract text content and transcripts",
-        analyze_with_gemini: "Gemini AI Text Analysis - Process and analyze content with advanced AI",
-        research_topic: "Comprehensive Topic Research Workflow - Advanced multi-step research with AI synthesis"
+        google_search: "Google Search",
+        scrape_page: "Scrape Page",
+        analyze_with_gemini: "Gemini Analysis",
+        research_topic: "Research Topic"
       };
 
-      // Verify titles are descriptive and follow the pattern: "Tool Name - Purpose"
+      // Verify titles are concise display names
       Object.values(expectedTitles).forEach(title => {
-        expect(title).toContain(' - ');
-        expect(title.length).toBeGreaterThan(20);
+        expect(title.length).toBeGreaterThan(5);
+        expect(title.length).toBeLessThan(30);
       });
     });
   });
@@ -520,7 +520,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
       // Simulate tool discovery process
       const toolMetadata = {
         google_search: {
-          title: "Google Web Search - Find relevant web pages and resources",
+          title: "Google Search",
           parameters: {
             query: { description: "The search query string. Use natural language or specific keywords for better results." },
             num_results: { description: "Number of search results to return (1-10).", min: 1, max: 10, default: 5 }
