@@ -1,4 +1,8 @@
-# TODO: Google Researcher MCP — Audit, Improvements & Roadmap
+# TODO: Google Researcher MCP — Future Improvements
+
+> **Updated:** 2026-02-07 | **Current version:** 6.0.0
+>
+> This file tracks future improvements and technical debt. The server is production-ready as-is. For release history, see [CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Table of Contents
 
@@ -48,7 +52,7 @@ The MCP spec has moved from **2025-03-26** to **2025-11-25**. These items bring 
 
 ### 1.4 — Support `resource_link` content type in tool results
 - New content type that returns a URI link to a resource rather than embedding full content
-- Useful for `research_topic` to reference cached results
+- Useful for `search_and_scrape` to reference cached results
 
 ### 1.5 — Add content annotations
 - Tool result content blocks now support `audience` (`"user"` / `"assistant"`), `priority` (0.0-1.0), and `lastModified`
@@ -80,8 +84,7 @@ The MCP spec has moved from **2025-03-26** to **2025-11-25**. These items bring 
     tools/
       googleSearch.ts
       scrapePage.ts
-      analyzeWithGemini.ts
-      researchTopic.ts
+      searchAndScrape.ts
     transports/
       stdio.ts
       http.ts
@@ -110,10 +113,8 @@ The MCP spec has moved from **2025-03-26** to **2025-11-25**. These items bring 
 - **File:** `src/cache/persistentCache.ts` — dozens of commented `console.log` lines
 - **Fix:** Delete them; use a proper logging framework with log levels
 
-### 2.6 — Consolidate YouTube transcript libraries
-- **Files:** `package.json` lines 67, 76-77
-- Three libraries for the same functionality: `@danielxceron/youtube-transcript`, `youtube-transcript-api`, `youtube-transcript-ts`
-- **Fix:** Evaluate which works best and remove the others; reduces bundle size and confusion
+### 2.6 — ~~Consolidate YouTube transcript libraries~~ (Completed)
+- Resolved: unused libraries removed. Only `@danielxceron/youtube-transcript` remains.
 
 ### 2.7 — Fix unsafe type casts
 - `(data.items || []).map((i: any) => i.link)` — `src/server.ts` ~line 225
@@ -127,9 +128,9 @@ The MCP spec has moved from **2025-03-26** to **2025-11-25**. These items bring 
 ### 2.9 — Extract hardcoded constants
 - TTLs, timeouts, content limits, and other magic numbers scattered across `server.ts`
 - **Fix:** Create `src/config.ts` with documented constants:
-  - Search TTL: 30 min, Scrape TTL: 1 hour, Gemini TTL: 15 min
-  - HTTP timeout: 10s, Scrape timeout: 15s, Gemini timeout: 30s, Research timeout: 45s
-  - Content limits: 50KB scrape, 200KB Gemini input, 300KB research combined
+  - Search TTL: 30 min, Scrape TTL: 1 hour
+  - HTTP timeout: 10s, Scrape timeout: 15s, Research timeout: 45s
+  - Content limits: 50KB scrape, 300KB research combined
 
 ### 2.10 — Pin dependency versions
 - All deps use `^` ranges — risk of surprise breakage
@@ -214,15 +215,15 @@ MCP Prompts provide reusable workflow templates. Suggested prompts:
 
 #### 4.6 — Language detection and translation
 - Detect source language of scraped content
-- Optional translation to user's preferred language via Gemini
+- Optional translation to user's preferred language
 
 #### 4.7 — Content deduplication
-- `research_topic` currently concatenates results without deduplication
-- Add similarity detection to remove redundant content before Gemini analysis
+- `search_and_scrape` currently concatenates results without deduplication
+- Add similarity detection to remove redundant content
 
 #### 4.8 — Result quality scoring
 - Score scraped content by relevance, freshness, authority
-- Prioritize higher-quality sources in `research_topic`
+- Prioritize higher-quality sources in `search_and_scrape`
 
 ### Research Workflows
 
@@ -246,7 +247,7 @@ MCP Prompts provide reusable workflow templates. Suggested prompts:
 - Return `429` with `Retry-After` header
 
 #### 4.13 — Circuit breaker for external APIs
-- Implement circuit breaker pattern for Google Search, Gemini, and scraping
+- Implement circuit breaker pattern for Google Search and scraping
 - Prevent cascading failures when external services are down
 
 #### 4.14 — Health check endpoint
@@ -261,13 +262,11 @@ MCP Prompts provide reusable workflow templates. Suggested prompts:
 
 ## P5 — Performance & Observability
 
-### 5.1 — Structured logging
-- Replace `console.log/warn/error` with structured logger (pino, winston)
-- Include: timestamp, level, component, requestId, duration
-- Support log levels via `LOG_LEVEL` env var
+### 5.1 — ~~Structured logging~~ (Completed)
+- Implemented zero-dependency logger in `src/shared/logger.ts` — JSON in production, human-readable in dev, silent in test.
 
 ### 5.2 — Request tracing
-- Assign trace IDs to multi-step operations (especially `research_topic`)
+- Assign trace IDs to multi-step operations (especially `search_and_scrape`)
 - Log trace ID through search → scrape → analyze pipeline
 
 ### 5.3 — Per-tool execution metrics

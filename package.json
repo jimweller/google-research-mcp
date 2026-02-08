@@ -1,7 +1,7 @@
 {
   "name": "google-researcher-mcp",
-  "version": "1.2.1",
-  "description": "An MCP server providing Google Search, web scraping, and Gemini AI analysis tools to empower AI assistants with research capabilities.",
+  "version": "6.0.0",
+  "description": "An MCP server providing Google Search, web scraping, and multi-source research tools for AI assistants.",
   "author": {
     "name": "Zohar Babin",
     "url": "https://github.com/zoharbabin"
@@ -22,7 +22,6 @@
     "agent",
     "research",
     "google-search",
-    "gemini",
     "scraping",
     "llm"
   ],
@@ -64,12 +63,10 @@
     "build": "tsc",
     "postbuild": "node -e \"const f='dist/server.js';const c=require('fs').readFileSync(f,'utf8');if(!c.startsWith('#!'))require('fs').writeFileSync(f,'#!/usr/bin/env node\\n'+c)\"",
     "start": "node dist/server.js",
-    "dev": "tsx watch src/server.ts",
-    "dev:legacy": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "tsx watch src/server.ts"
   },
   "dependencies": {
     "@danielxceron/youtube-transcript": "^1.2.6",
-    "@google/genai": "^0.9.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "cors": "^2.8.5",
     "crawlee": "^3.13.2",
@@ -90,7 +87,6 @@
     "jest": "^29.7.0",
     "supertest": "^7.1.0",
     "ts-jest": "^29.3.2",
-    "ts-node-dev": "^2.0.0",
     "tsx": "^4.19.2"
   }
 }

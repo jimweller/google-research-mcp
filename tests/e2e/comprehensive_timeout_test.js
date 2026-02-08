@@ -1,7 +1,7 @@
 /**
  * Comprehensive Test Suite for Timeout Fixes
- * 
- * Tests all aspects of the timeout protection implemented in the research_topic tool:
+ *
+ * Tests all aspects of the timeout protection implemented in the search_and_scrape tool:
  * 1. Timeout Protection Tests
  * 2. Graceful Degradation Tests  
  * 3. Content Size Management Tests
@@ -103,30 +103,6 @@ class TimeoutTestSuite {
             );
         }
 
-        // Test 1.3: Gemini analysis timeout (30 seconds)
-        try {
-            const startTime = Date.now();
-            const largeText = "Analyze this comprehensive text about machine learning. ".repeat(5000); // Large input
-            const result = await this.test.client.callTool({
-                name: "analyze_with_gemini",
-                arguments: { text: largeText }
-            });
-            const duration = Date.now() - startTime;
-            
-            const completedInTime = duration < 32000; // Should complete within timeout + buffer
-            this.reportTest(
-                'Gemini analysis timeout protection (30s)',
-                result.content && completedInTime,
-                `Completed in ${duration}ms, analysis length: ${result.content[0]?.text?.length || 0}`
-            );
-        } catch (error) {
-            this.reportTest(
-                'Gemini analysis timeout protection (30s)',
-                error.message.includes('timeout') || error.message.includes('aborted'),
-                `Error: ${error.message}`
-            );
-        }
-
         console.log('');
     }
 
@@ -138,7 +114,7 @@ class TimeoutTestSuite {
         // Test 2.1: Promise.allSettled handles partial URL failures
         try {
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'TypeScript programming language features',
                     num_results: 5 // More URLs to increase chance of some failures
@@ -146,7 +122,7 @@ class TimeoutTestSuite {
             });
             
             const hasResults = result.content && result.content[0].text.length > 0;
-            const hasResearchSummary = result.content[0].text.includes('Research Summary');
+            const hasResearchSummary = result.content[0].text.includes('Summary');
             const hasMetrics = result.content[0].text.includes('URLs successfully scraped') || 
                              result.content[0].text.includes('processing time');
             
@@ -175,9 +151,9 @@ class TimeoutTestSuite {
             });
 
             if (searchResult.content && searchResult.content.length > 0) {
-                // Test research_topic with these URLs
+                // Test search_and_scrape with these URLs
                 const researchResult = await this.test.client.callTool({
-                    name: "research_topic",
+                    name: "search_and_scrape",
                     arguments: {
                         query: 'JavaScript async await promises',
                         num_results: 4
@@ -185,7 +161,7 @@ class TimeoutTestSuite {
                 });
 
                 const completedSuccessfully = researchResult.content && 
-                                            researchResult.content[0].text.includes('Research Summary');
+                                            researchResult.content[0].text.includes('Summary');
                 
                 this.reportTest(
                     'Research continues despite some URL failures',
@@ -235,10 +211,10 @@ class TimeoutTestSuite {
             );
         }
 
-        // Test 3.2: 300KB max combined content limit in research_topic
+        // Test 3.2: 300KB max combined content limit in search_and_scrape
         try {
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'comprehensive guide to machine learning algorithms',
                     num_results: 6 // More URLs to potentially hit the limit
@@ -259,31 +235,6 @@ class TimeoutTestSuite {
                 '300KB max combined content management',
                 false,
                 `Research failed: ${error.message}`
-            );
-        }
-
-        // Test 3.3: 200KB max Gemini input limit
-        try {
-            // Create content larger than 200KB to test truncation
-            const largeContent = "This is a very long text for testing Gemini input limits. ".repeat(4000); // ~240KB
-            const result = await this.test.client.callTool({
-                name: "analyze_with_gemini",
-                arguments: { text: largeContent }
-            });
-            
-            const hasResult = result.content && result.content[0].text.length > 0;
-            const inputSize = largeContent.length;
-            
-            this.reportTest(
-                '200KB max Gemini input limit with truncation',
-                hasResult,
-                `Input: ${inputSize} bytes (${(inputSize/1024).toFixed(1)}KB), Analysis completed: ${hasResult}`
-            );
-        } catch (error) {
-            this.reportTest(
-                '200KB max Gemini input limit with truncation',
-                false,
-                `Analysis failed: ${error.message}`
             );
         }
 
@@ -318,11 +269,11 @@ class TimeoutTestSuite {
             );
         }
 
-        // Test 4.2: Fallback mechanisms in research_topic
+        // Test 4.2: Fallback mechanisms in search_and_scrape
         try {
             // Test with a query that might have some problematic URLs
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'Node.js performance optimization techniques',
                     num_results: 3
@@ -330,7 +281,7 @@ class TimeoutTestSuite {
             });
             
             const completedWithFallback = result.content && 
-                                        result.content[0].text.includes('Research Summary');
+                                        result.content[0].text.includes('Summary');
             
             this.reportTest(
                 'Fallback mechanisms work correctly',
@@ -353,11 +304,11 @@ class TimeoutTestSuite {
         console.log('🔗 CATEGORY 5: INTEGRATION TESTS');
         console.log('=' .repeat(60));
 
-        // Test 5.1: Full research_topic workflow
+        // Test 5.1: Full search_and_scrape workflow
         try {
             const startTime = Date.now();
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'React hooks useState useEffect',
                     num_results: 3
@@ -367,17 +318,17 @@ class TimeoutTestSuite {
             
             const hasAllComponents = result.content &&
                                    result.content[0].text.length > 200 &&
-                                   (result.content[0].text.includes('Research Summary') ||
+                                   (result.content[0].text.includes('Summary') ||
                                     result.content[0].text.includes('research'));
             
             this.reportTest(
-                'Full research_topic workflow integration',
+                'Full search_and_scrape workflow integration',
                 hasAllComponents,
                 `Duration: ${duration}ms, Has all components: ${hasAllComponents}, Length: ${result.content[0].text.length}`
             );
         } catch (error) {
             this.reportTest(
-                'Full research_topic workflow integration',
+                'Full search_and_scrape workflow integration',
                 false,
                 `Integration test failed: ${error.message}`
             );
@@ -387,7 +338,7 @@ class TimeoutTestSuite {
         try {
             const startTime = Date.now();
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'Python data analysis pandas',
                     num_results: 2
@@ -414,7 +365,7 @@ class TimeoutTestSuite {
         try {
             // Test research with a query that might return some problematic URLs
             const result = await this.test.client.callTool({
-                name: "research_topic",
+                name: "search_and_scrape",
                 arguments: {
                     query: 'software development best practices 2024',
                     num_results: 4
@@ -422,7 +373,7 @@ class TimeoutTestSuite {
             });
             
             const resilient = result.content && 
-                            result.content[0].text.includes('Research Summary') &&
+                            result.content[0].text.includes('Summary') &&
                             result.content[0].text.length > 500;
             
             this.reportTest(

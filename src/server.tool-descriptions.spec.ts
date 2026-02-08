@@ -22,15 +22,6 @@ import { PersistentEventStore } from './shared/persistentEventStore.js';
 import { z } from 'zod';
 import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
-// Mock external dependencies to focus on tool description testing
-jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({
-    models: {
-      generateContent: jest.fn(() => Promise.resolve({ text: 'Mock AI analysis result' }))
-    }
-  }))
-}));
-
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(() => ({
     run: jest.fn(() => Promise.resolve())
@@ -146,63 +137,33 @@ describe('Enhanced MCP Tool Descriptions', () => {
       );
     });
 
-    it('should register analyze_with_gemini tool with enhanced descriptions', () => {
+    it('should register search_and_scrape tool with enhanced descriptions', () => {
       const toolSpy = jest.spyOn(server, 'tool');
-      
-      server.tool(
-        "analyze_with_gemini",
-        {
-          text: z.string().describe("The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results."),
-          model: z.string().default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. Available options: 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support). Use gemini-2.0-flash-001 for speed, gemini-pro for detailed analysis."),
-        },
-        {
-          title: "Gemini Analysis",
-          readOnlyHint: true,
-          openWorldHint: false
-        },
-        async ({ text, model = "gemini-2.0-flash-001" }) => ({ content: [{ type: "text" as const, text: "Mock AI analysis" }] })
-      );
 
-      expect(toolSpy).toHaveBeenCalledWith(
-        "analyze_with_gemini",
-        expect.objectContaining({
-          text: expect.any(Object),
-          model: expect.any(Object)
-        }),
-        expect.objectContaining({
-          title: "Gemini Analysis",
-          readOnlyHint: true,
-          openWorldHint: false
-        }),
-        expect.any(Function)
-      );
-    });
-
-    it('should register research_topic tool with enhanced descriptions', () => {
-      const toolSpy = jest.spyOn(server, 'tool');
-      
       server.tool(
-        "research_topic",
+        "search_and_scrape",
         {
-          query: z.string().describe("The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results. Frame as a research question or specific topic for comprehensive analysis. Examples: 'artificial intelligence trends 2024', 'sustainable energy solutions for small businesses', 'TypeScript performance optimization techniques'."),
-          num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze. More sources provide broader coverage but take longer to process. Recommended range: 2-5 sources for optimal balance of speed and coverage. Use 2-3 for quick research, 4-5 for comprehensive analysis.")
+          query: z.string().min(1).max(500).describe("The search query."),
+          num_results: z.number().min(1).max(10).default(3).describe("Number of URLs to search and scrape (1-10)."),
+          include_sources: z.boolean().default(true).describe("Append source URLs list.")
         },
         {
-          title: "Research Topic",
+          title: "Search and Scrape",
           readOnlyHint: true,
           openWorldHint: true
         },
-        async ({ query, num_results }) => ({ content: [{ type: "text" as const, text: "Mock research result" }] })
+        async ({ query, num_results, include_sources }) => ({ content: [{ type: "text" as const, text: "Mock combined result" }] })
       );
 
       expect(toolSpy).toHaveBeenCalledWith(
-        "research_topic",
+        "search_and_scrape",
         expect.objectContaining({
           query: expect.any(Object),
-          num_results: expect.any(Object)
+          num_results: expect.any(Object),
+          include_sources: expect.any(Object)
         }),
         expect.objectContaining({
-          title: "Research Topic",
+          title: "Search and Scrape",
           readOnlyHint: true,
           openWorldHint: true
         }),
@@ -244,23 +205,9 @@ describe('Enhanced MCP Tool Descriptions', () => {
       // Note: ftp:// URLs are actually valid URLs according to URL spec, so we don't test that
     });
 
-    it('should validate analyze_with_gemini parameters with enhanced constraints', () => {
-      const textSchema = z.string().describe("Enhanced text description");
-      const modelSchema = z.string().default("gemini-2.0-flash-001").describe("Enhanced model description");
-
-      // Valid inputs
-      expect(() => textSchema.parse("Text to analyze")).not.toThrow();
-      expect(() => modelSchema.parse("gemini-2.0-flash-001")).not.toThrow();
-      expect(() => modelSchema.parse("gemini-pro")).not.toThrow();
-
-      // Invalid inputs
-      expect(() => textSchema.parse(123)).toThrow();
-      expect(() => textSchema.parse(null)).toThrow();
-    });
-
-    it('should validate research_topic parameters with enhanced constraints', () => {
-      const querySchema = z.string().describe("Enhanced research query description");
-      const numResultsSchema = z.number().min(1).max(5).default(3).describe("Enhanced num_results description");
+    it('should validate search_and_scrape parameters with enhanced constraints', () => {
+      const querySchema = z.string().min(1).max(500).describe("Search query");
+      const numResultsSchema = z.number().min(1).max(10).default(3).describe("Num results");
 
       // Valid inputs
       expect(() => querySchema.parse("AI research topic")).not.toThrow();
@@ -270,7 +217,7 @@ describe('Enhanced MCP Tool Descriptions', () => {
 
       // Invalid inputs
       expect(() => numResultsSchema.parse(0)).toThrow();
-      expect(() => numResultsSchema.parse(6)).toThrow();
+      expect(() => numResultsSchema.parse(11)).toThrow();
       expect(() => numResultsSchema.parse(-1)).toThrow();
     });
   });
@@ -286,26 +233,21 @@ describe('Enhanced MCP Tool Descriptions', () => {
     });
 
     it('should have proper openWorldHint values for each tool', () => {
-      // google_search, scrape_page, research_topic should have openWorldHint: true (access external data)
-      // analyze_with_gemini should have openWorldHint: false (processes provided data)
-      
-      const searchOpenWorld = true; // Accesses external search results
-      const scrapeOpenWorld = true; // Accesses external web pages
-      const geminiOpenWorld = false; // Processes provided text only
-      const researchOpenWorld = true; // Accesses multiple external sources
-      
+      // All three tools access external data → openWorldHint: true
+      const searchOpenWorld = true;
+      const scrapeOpenWorld = true;
+      const searchAndScrapeOpenWorld = true;
+
       expect(searchOpenWorld).toBe(true);
       expect(scrapeOpenWorld).toBe(true);
-      expect(geminiOpenWorld).toBe(false);
-      expect(researchOpenWorld).toBe(true);
+      expect(searchAndScrapeOpenWorld).toBe(true);
     });
 
     it('should have descriptive titles for all tools', () => {
       const expectedTitles = {
         google_search: "Google Search",
         scrape_page: "Scrape Page",
-        analyze_with_gemini: "Gemini Analysis",
-        research_topic: "Research Topic"
+        search_and_scrape: "Search and Scrape"
       };
 
       // Verify titles are concise display names
@@ -323,10 +265,8 @@ describe('Enhanced MCP Tool Descriptions', () => {
         search_query: "The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources.",
         search_num_results: "Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage.",
         scrape_url: "The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.",
-        gemini_text: "The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results.",
-        gemini_model: "The Gemini model to use for analysis. Available options: 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support). Use gemini-2.0-flash-001 for speed, gemini-pro for detailed analysis.",
-        research_query: "The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results. Frame as a research question or specific topic for comprehensive analysis. Examples: 'artificial intelligence trends 2024', 'sustainable energy solutions for small businesses', 'TypeScript performance optimization techniques'.",
-        research_num_results: "Number of sources to research and analyze. More sources provide broader coverage but take longer to process. Recommended range: 2-5 sources for optimal balance of speed and coverage. Use 2-3 for quick research, 4-5 for comprehensive analysis."
+        search_and_scrape_query: "The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources.",
+        search_and_scrape_num_results: "Number of URLs to search for and scrape (1-10). More sources provide broader coverage but increase latency."
       };
 
       Object.entries(descriptions).forEach(([param, description]) => {
@@ -342,11 +282,11 @@ describe('Enhanced MCP Tool Descriptions', () => {
       });
     });
 
-    it('should include examples in parameter descriptions where appropriate', () => {
-      const researchQueryDesc = "The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results. Frame as a research question or specific topic for comprehensive analysis. Examples: 'artificial intelligence trends 2024', 'sustainable energy solutions for small businesses', 'TypeScript performance optimization techniques'.";
-      
-      expect(researchQueryDesc).toContain('Examples:');
-      expect(researchQueryDesc).toContain("'artificial intelligence trends 2024'");
+    it('should include guidance in parameter descriptions where appropriate', () => {
+      const queryDesc = "The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources.";
+
+      expect(queryDesc).toContain('Use specific queries');
+      expect(queryDesc).toContain('Google');
     });
 
     it('should include constraint information in parameter descriptions', () => {
@@ -543,40 +483,29 @@ describe('Enhanced MCP Tool Descriptions', () => {
       expect(toolMetadata.google_search.parameters.num_results).toHaveProperty('default');
     });
 
-    it('should handle composite workflow execution', async () => {
-      // Test the research_topic workflow with enhanced descriptions
+    it('should handle composite search_and_scrape workflow', async () => {
       const mockGoogleSearch = jest.fn();
       mockGoogleSearch.mockImplementation(() => Promise.resolve([
         { type: "text", text: "https://example1.com" },
         { type: "text", text: "https://example2.com" }
       ]));
-      
+
       const mockScrapePage = jest.fn();
       mockScrapePage.mockImplementation(() => Promise.resolve([
-        { type: "text", text: "Content from example1.com with sufficient length for testing purposes and validation" }
-      ]));
-      
-      const mockAnalyzeWithGemini = jest.fn();
-      mockAnalyzeWithGemini.mockImplementation(() => Promise.resolve([
-        { type: "text", text: "AI analysis of the combined content" }
+        { type: "text", text: "Content from example1.com" }
       ]));
 
-      // Simulate research workflow
       const query = "AI trends 2024";
-      const numResults = 2;
-      
-      const searchResults = await mockGoogleSearch({ query, num_results: numResults });
+      const searchResults = await mockGoogleSearch({ query, num_results: 2 });
       expect(searchResults).toHaveLength(2);
-      
+
       const scrapeResults = await Promise.all(
         (searchResults as any[]).map(result => mockScrapePage({ url: result.text }))
       );
       expect(scrapeResults).toHaveLength(2);
-      
-      const combinedContent = scrapeResults.flat().map((r: any) => r.text).join('\n\n');
-      const analysis = await mockAnalyzeWithGemini({ text: combinedContent });
-      
-      expect(analysis).toEqual([{ type: "text", text: "AI analysis of the combined content" }]);
+
+      const combined = scrapeResults.flat().map((r: any) => r.text).join('\n\n');
+      expect(combined.length).toBeGreaterThan(0);
     });
   });
 });

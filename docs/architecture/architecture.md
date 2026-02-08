@@ -24,10 +24,9 @@ This document provides a comprehensive overview of the Google Researcher MCP Ser
 
 The Google Researcher MCP Server is a backend service that implements the [Model Context Protocol (MCP)](https://github.com/zoharbabin/google-research-mcp). Its primary purpose is to empower AI assistants and other clients with a powerful suite of research-oriented tools:
 
--   **`google_search`**: Executes queries against the Google Search API.
+-   **`google_search`**: Executes queries against the Google Search API. Supports recency filtering via `time_range`.
 -   **`scrape_page`**: Extracts text content from web pages and YouTube videos.
--   **`analyze_with_gemini`**: Performs advanced text analysis using Google's Gemini models.
--   **`research_topic`**: A composite tool that orchestrates the other three for a complete research workflow.
+-   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, returning combined raw content with source attribution.
 
 To deliver these capabilities reliably and efficiently, the server is built with production-grade features, including a two-layer persistent cache, robust timeout and error handling, and enterprise-grade security for its web-facing endpoints.
 
@@ -65,15 +64,13 @@ graph TD
     subgraph "Tools"
         F[google_search]
         G[scrape_page]
-        H[analyze_with_gemini]
-        I[research_topic]
+        I[search_and_scrape]
         YT[YouTube Transcript Extractor]
     end
 
     subgraph "External Services"
         M[Google Search API]
         N[Web Pages]
-        O[Google Gemini API]
         P[YouTube Transcript API]
     end
 
@@ -87,17 +84,18 @@ graph TD
     D -- Routes to --> E
     E -- Invokes --> F
     E -- Invokes --> G
-    E -- Invokes --> H
     E -- Invokes --> I
 
     G -- Uses --> YT
 
     F -- Calls --> M
     G -- Calls --> N
-    H -- Calls --> O
     YT -- Calls --> P
 
-    F & G & H & I & YT -- Use for caching --> J
+    I -- Uses --> F
+    I -- Uses --> G
+
+    F & G & I & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
 
     style YT fill:#cce5ff,stroke:#333,stroke-width:2px

@@ -37,13 +37,11 @@ These scopes grant permission to execute specific tools provided by the MCP serv
 |-------|-------------|-------|
 | \`${TOOL_SCOPES.GOOGLE_SEARCH}\` | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.GOOGLE_SEARCH].description} | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.GOOGLE_SEARCH].usage} |
 | \`${TOOL_SCOPES.SCRAPE_PAGE}\` | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.SCRAPE_PAGE].description} | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.SCRAPE_PAGE].usage} |
-| \`${TOOL_SCOPES.ANALYZE_WITH_GEMINI}\` | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.ANALYZE_WITH_GEMINI].description} | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.ANALYZE_WITH_GEMINI].usage} |
-| \`${TOOL_SCOPES.RESEARCH_TOPIC}\` | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.RESEARCH_TOPIC].description} | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.RESEARCH_TOPIC].usage} |
+| \`${TOOL_SCOPES.SEARCH_AND_SCRAPE}\` | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.SEARCH_AND_SCRAPE].description} | ${SCOPE_DOCUMENTATION[TOOL_SCOPES.SEARCH_AND_SCRAPE].usage} |
 
 ### Security Considerations for Tool Scopes
 
 - **\`${TOOL_SCOPES.SCRAPE_PAGE}\`**: This scope allows making requests to arbitrary URLs. To mitigate Server-Side Request Forgery (SSRF) risks, implement URL allowlisting and validate URLs against private IP ranges.
-- **\`${TOOL_SCOPES.ANALYZE_WITH_GEMINI}\`**: Consider the sensitivity of data being sent to external AI services. Ensure appropriate data handling policies are in place.
 
 ## Administrative Scopes
 

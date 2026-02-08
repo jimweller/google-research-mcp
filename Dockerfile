@@ -40,6 +40,11 @@ USER mcp
 # Expose HTTP transport port (configurable via PORT env var)
 EXPOSE 3000
 
+# Health check for container orchestrators (Docker, Kubernetes).
+# Only effective when running in HTTP transport mode.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
 # Default to stdio transport for MCP client compatibility.
 # Override with MCP_TEST_MODE="" to enable HTTP transport.
 ENV MCP_TEST_MODE=stdio

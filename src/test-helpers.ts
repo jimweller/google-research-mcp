@@ -72,7 +72,6 @@ export async function cleanupTestStorage(paths: TestStoragePaths): Promise<void>
 const TEST_ENV_VARS: Record<string, string> = {
   GOOGLE_CUSTOM_SEARCH_API_KEY: 'test-api-key',
   GOOGLE_CUSTOM_SEARCH_ID: 'test-search-id',
-  GOOGLE_GEMINI_API_KEY: 'test-gemini-key',
 };
 
 /**

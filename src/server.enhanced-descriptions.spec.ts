@@ -13,15 +13,6 @@ import { createAppAndHttpTransport } from './server.js';
 import supertest from 'supertest';
 import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
-// Mock external dependencies
-jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({
-    models: {
-      generateContent: jest.fn(() => Promise.resolve({ text: 'Mock AI analysis result' }))
-    }
-  }))
-}));
-
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(() => ({
     run: jest.fn(() => Promise.resolve())

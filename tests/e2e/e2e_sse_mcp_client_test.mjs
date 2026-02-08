@@ -30,22 +30,9 @@ try {
   console.log("Waiting briefly after connection...");
   await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1000ms delay
 
-  // Run individual tests instead of runAllTests
+  // Run all tests
   console.log("Running SSE tests...");
-
-  // Check environment variables
-  sseTest.checkEnvironmentVariables();
-
-  // Run individual tests
-  await sseTest.listTools();
-  const url = await sseTest.testGoogleSearch();
-  await sseTest.testScrapePage(url);
-  await sseTest.testAnalyzeWithGemini();
-  await sseTest.testResearchTopic();
-  const transcript = await sseTest.testYouTubeTranscript();
-  await sseTest.testTranscriptAnalysis(transcript);
-  
-  console.log("🎉 All SSE-based end-to-end tests passed!");
+  await sseTest.runAllTests();
   
   // Clean up resources
   await sseTest.cleanup();

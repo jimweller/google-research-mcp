@@ -1,14 +1,15 @@
 #!/bin/bash
 
-# SSE Test Runner Script
+# HTTP Transport Test Runner Script
 # Properly handles server startup, test execution, and cleanup
+# Note: The script is named "sse" for backward compatibility with CI pipelines.
 
 set -e
 
 echo "🔧 Building project..."
 npm run build
 
-echo "🚀 Starting server for SSE test..."
+echo "🚀 Starting server for HTTP transport test..."
 npm run start &
 SERVER_PID=$!
 echo "Server PID: $SERVER_PID"
@@ -50,17 +51,17 @@ trap cleanup EXIT INT TERM
 echo "⏳ Waiting for server to be ready..."
 sleep 10
 
-echo "🧪 Running SSE test with timeout protection..."
+echo "🧪 Running HTTP transport test with timeout protection..."
 # Run the test with a timeout to prevent hanging
 timeout 120 node tests/e2e/e2e_sse_mcp_client_test.mjs || {
     TEST_EXIT_CODE=$?
     if [ $TEST_EXIT_CODE -eq 124 ]; then
-        echo "⚠️ SSE test timed out after 120 seconds"
+        echo "⚠️ HTTP transport test timed out after 120 seconds"
         exit 1
     else
-        echo "❌ SSE test failed with exit code: $TEST_EXIT_CODE"
+        echo "❌ HTTP transport test failed with exit code: $TEST_EXIT_CODE"
         exit $TEST_EXIT_CODE
     fi
 }
 
-echo "🎉 SSE test completed successfully!"
+echo "🎉 HTTP transport test completed successfully!"

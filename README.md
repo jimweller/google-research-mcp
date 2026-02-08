@@ -4,13 +4,11 @@
 [![codecov](https://codecov.io/gh/zoharbabin/google-research-mcp/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/zoharbabin/google-research-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/CONTRIBUTING.md)
 
 > **Empower AI assistants with robust, persistent, and secure web research capabilities.**
 >
-> This server implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), providing a suite of tools for Google Search, content scraping, and Gemini AI analysis. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
->
-> **🎉 Latest Update (v1.2.1):** Fixed critical issue where `scrape_page` and `research_topic` tools were returning placeholder test content instead of actual scraped data. All tools now return real web content as expected.
+> This server implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), providing tools for Google Search, web scraping, and multi-source content gathering. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
 
 <img width="499" alt="image" src="https://github.com/user-attachments/assets/e369b537-3043-4f80-b7f2-410512ebc1b4" />
 
@@ -41,20 +39,19 @@
 
 ## Why Use This Server?
 
-- **Extend AI Capabilities**: Grant AI assistants access to real-time web information and powerful analytical tools.
-- **Maximize Performance**: Drastically reduce latency for repeated queries with a sophisticated two-layer persistent cache (in-memory and disk).
-- **Reduce Costs**: Minimize expensive API calls to Google Search and Gemini by caching results.
-- **Ensure Reliability**: Prevent failures and ensure consistent performance with comprehensive timeout handling and graceful degradation.
+- **Extend AI Capabilities**: Grant AI assistants access to real-time web information via search and scraping.
+- **Maximize Performance**: Reduce latency for repeated queries with a two-layer persistent cache (in-memory and disk).
+- **Reduce Costs**: Minimize expensive API calls to Google Search by caching results.
+- **Ensure Reliability**: Comprehensive timeout handling, graceful degradation, and resilient multi-source scraping.
 - **Flexible & Secure Integration**: Connect any MCP-compatible client via STDIO or HTTP+SSE, with enterprise-grade OAuth 2.1 for secure API access.
 - **Open & Extensible**: MIT licensed, fully open-source, and designed for easy modification and extension.
 
 ## Features
 
-- **Core Research Tools**:
-  - `google_search`: Find information using the Google Search API.
-  - `scrape_page`: Extract content from websites and YouTube videos with robust transcript extraction.
-  - `analyze_with_gemini`: Process text using Google's powerful Gemini AI models.
-  - `research_topic`: A composite tool that combines search, scraping, and analysis into a single, efficient operation.
+- **Core Tools**:
+  - `google_search`: Find URLs using the Google Custom Search API, with recency filtering.
+  - `scrape_page`: Extract text from web pages and YouTube video transcripts.
+  - `search_and_scrape`: Composite tool — searches Google, scrapes the top results in parallel, and returns combined raw content with source attribution.
 - **YouTube Transcript Extraction**:
   - **Robust YouTube transcript extraction with comprehensive error handling**: 10 distinct error types with clear, actionable messages.
   - **Intelligent retry logic with exponential backoff**: Automatic retries for transient failures (network issues, rate limiting, timeouts).
@@ -96,8 +93,7 @@ graph TD
     subgraph "Tools"
         F[google_search]
         G[scrape_page]
-        H[analyze_with_gemini]
-        I[research_topic]
+        I[search_and_scrape]
     end
 
     subgraph "Support Systems"
@@ -113,9 +109,8 @@ graph TD
     D -- Routes to --> E
     E -- Invokes --> F
     E -- Invokes --> G
-    E -- Invokes --> H
     E -- Invokes --> I
-    F & G & H & I -- Uses --> J
+    F & G & I -- Uses --> J
     D -- Uses --> K
     C -- Protected by --> L
 
@@ -183,8 +178,7 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
 - **API Keys**:
   - [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction)
   - [Google Custom Search Engine ID](https://programmablesearchengine.google.com/)
-  - [Google Gemini API Key](https://ai.google.dev/)
-- **OAuth 2.1 Provider** (for HTTP transport): An external authorization server (e.g., Auth0, Okta) to issue JWTs.
+- **OAuth 2.1 Provider** (HTTP transport only — not needed for STDIO): An external authorization server (e.g., Auth0, Okta) to issue JWTs.
 
 ### Installation & Setup
 
@@ -265,10 +259,9 @@ The server provides a suite of powerful tools for research and analysis. Each to
 
 | Tool | Title | Description & Parameters |
 | :--- | :--- | :--- |
-| **`google_search`** | **Google Search** | **Description:** Searches the web using the Google Custom Search API to find relevant web pages and resources. Ideal for finding current information, discovering authoritative sources, and locating specific documents. Results are cached for 30 minutes.<br><br>**Parameters:**<br> - `query` (string, required): The search query. Use specific, targeted keywords for best results.<br> - `num_results` (number, optional, default: 5): The number of search results to return (1-10). |
-| **`scrape_page`** | **Scrape Page** | **Description:** Extracts text content from web pages and YouTube videos with robust transcript extraction capabilities. Features comprehensive error handling with 10 distinct error types (TRANSCRIPT_DISABLED, VIDEO_UNAVAILABLE, NETWORK_ERROR, etc.), automatic retry logic with exponential backoff for transient failures, and user-friendly error messages. Supports both youtube.com/watch?v= and youtu.be/ URL formats. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL of the web page or YouTube video to scrape. YouTube URLs automatically extract transcripts when available. |
-| **`analyze_with_gemini`** | **Gemini Analysis** | **Description:** Processes and analyzes text content using Google's Gemini AI models. It can summarize, answer questions, and generate insights from provided text. Large texts are automatically truncated. Results are cached for 15 minutes.<br><br>**Parameters:**<br> - `text` (string, required): The text content to analyze.<br> - `model` (string, optional, default: "gemini-2.0-flash-001"): The Gemini model to use (e.g., `gemini-2.0-flash-001`, `gemini-pro`). |
-| **`research_topic`** | **Research Topic** | **Description:** A powerful composite tool that automates the entire research process: it searches for a topic, scrapes the content from multiple sources, and synthesizes the findings with Gemini AI. It's designed for resilience and provides comprehensive analysis.<br><br>**Parameters:**<br> - `query` (string, required): The research topic or question.<br> - `num_results` (number, optional, default: 3): The number of sources to research (recommended: 2-5). |
+| **`google_search`** | **Google Search** | Searches the web using the Google Custom Search API. Returns URLs. Results are cached for 30 minutes.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 5): Number of results (1-10).<br> - `time_range` (string, optional): Recency filter: `day`, `week`, `month`, `year`. |
+| **`scrape_page`** | **Scrape Page** | Extracts text from web pages and YouTube video transcripts. Features SSRF protection, 10 YouTube error types with retry logic, and exponential backoff. Results are cached for 1 hour.<br><br>**Parameters:**<br> - `url` (string, required): The URL to scrape (max 2048 chars). YouTube URLs auto-extract transcripts. |
+| **`search_and_scrape`** | **Search and Scrape** | Composite tool: searches Google for a query, scrapes the top results in parallel with graceful degradation (`Promise.allSettled`), and returns the combined raw content with source attribution. Useful when you need content from multiple sources in one call.<br><br>**Parameters:**<br> - `query` (string, required): The search query (1-500 chars).<br> - `num_results` (number, optional, default: 3): Number of URLs to search and scrape (1-10).<br> - `include_sources` (boolean, optional, default: true): Append numbered source URL list. |
 
 ### Quick Start with npx
 
@@ -283,8 +276,7 @@ You can run the server directly via `npx` without cloning the repository. This i
       "args": ["-y", "google-researcher-mcp"],
       "env": {
         "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
-        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx",
-        "GOOGLE_GEMINI_API_KEY": "your-gemini-key"
+        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
       }
     }
   }
@@ -300,8 +292,7 @@ You can run the server directly via `npx` without cloning the repository. This i
       "args": ["-y", "google-researcher-mcp"],
       "env": {
         "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
-        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx",
-        "GOOGLE_GEMINI_API_KEY": "your-gemini-key"
+        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
       }
     }
   }
@@ -382,10 +373,12 @@ try {
 
 ### Management API
 
-The server provides several administrative endpoints for monitoring and control. Access to these endpoints is protected by OAuth scopes.
+The server provides several administrative and operational endpoints.
 
 | Method | Endpoint                 | Description                             | Required Scope               |
 |--------|--------------------------|-----------------------------------------|------------------------------|
+| `GET`  | `/health`                | Server health check (status, version, uptime). | Public (unauthenticated) |
+| `GET`  | `/version`               | Server version and runtime info.        | Public (unauthenticated)     |
 | `GET`  | `/mcp/cache-stats`       | View cache performance statistics.      | `mcp:admin:cache:read`       |
 | `GET`  | `/mcp/event-store-stats` | View event store usage statistics.      | `mcp:admin:event-store:read` |
 | `POST` | `/mcp/cache-invalidate`  | Clear specific cache entries.           | `mcp:admin:cache:invalidate` |
@@ -433,8 +426,7 @@ For a complete guide on setting up OAuth, see the [**Security Configuration Guid
 #### Tool Execution Scopes
 - `mcp:tool:google_search:execute`
 - `mcp:tool:scrape_page:execute`
-- `mcp:tool:analyze_with_gemini:execute`
-- `mcp:tool:research_topic:execute`
+- `mcp:tool:search_and_scrape:execute`
 
 #### Administrative Scopes
 - `mcp:admin:cache:read`
@@ -455,9 +447,23 @@ The project maintains a high standard of quality through a combination of end-to
 
 For more details on the testing philosophy and structure, see the [**Testing Guide**](./docs/testing-guide.md).
 
+### NPM Scripts Quick Reference
+
+| Script | When to Use |
+|--------|-------------|
+| `npm start` | Run the built server (production). |
+| `npm run dev` | Start with live-reload during development. |
+| `npm run build` | Compile TypeScript to `dist/`. |
+| `npm test` | Run all unit/component tests (Jest). |
+| `npm run test:coverage` | Generate a code coverage report. |
+| `npm run test:e2e` | Run full end-to-end suite (STDIO + HTTP + YouTube). |
+| `npm run test:e2e:stdio` | Run only the STDIO transport E2E test. |
+| `npm run test:e2e:sse` | Run only the HTTP transport E2E test. |
+| `npm run test:e2e:youtube` | Run only the YouTube transcript E2E test. |
+
 ## Troubleshooting
 
-- **Server won't start**: Ensure all required environment variables (`GOOGLE_CUSTOM_SEARCH_API_KEY`, `GOOGLE_CUSTOM_SEARCH_ID`, `GOOGLE_GEMINI_API_KEY`) are set. The server will exit with a clear error if any are missing.
+- **Server won't start**: Ensure all required environment variables (`GOOGLE_CUSTOM_SEARCH_API_KEY`, `GOOGLE_CUSTOM_SEARCH_ID`) are set. The server will exit with a clear error if any are missing.
 - **YouTube transcripts fail**: Some videos have transcripts disabled by their owner. The error message will indicate the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`).
 - **Cache issues**: Use the `/mcp/cache-stats` endpoint to inspect cache health, or `/mcp/cache-persist` to force a disk save. See the [Management API](#management-api) table for all administrative endpoints.
 - **OAuth errors**: Verify your JWKS URI, issuer, and audience settings in the `.env` file. Use `/mcp/oauth-config` to inspect the current configuration.

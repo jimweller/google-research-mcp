@@ -14,15 +14,6 @@ import { PersistentCache } from './cache/index.js';
 import { PersistentEventStore } from './shared/persistentEventStore.js';
 import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
-// Mock external dependencies to avoid network calls and complex integrations
-jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({
-    models: {
-      generateContent: jest.fn(() => Promise.resolve({ text: 'Mock AI analysis result' }))
-    }
-  }))
-}));
-
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(({ requestHandler }) => ({
     run: jest.fn(async (urls) => {
@@ -124,16 +115,6 @@ describe('Focused Server Coverage Tests', () => {
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       // Verify Crawlee mock was set up (indicates scraping setup was covered)
-      expect(app).toBeDefined();
-    });
-
-    it('should cover Gemini AI analysis function implementation', async () => {
-      const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-      
-      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
-      const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
-      // Verify GoogleGenAI mock was set up (indicates AI analysis setup was covered)
       expect(app).toBeDefined();
     });
 

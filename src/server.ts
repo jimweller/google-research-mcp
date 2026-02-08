@@ -4,7 +4,7 @@
  * This file implements a Model Context Protocol (MCP) server that provides tools for:
  * - Web search via Google Custom Search API
  * - Web page scraping (including YouTube transcript extraction)
- * - Content analysis using Google's Gemini AI
+ * - Multi-source search and scrape pipeline
  *
  * The server supports two transport mechanisms:
  * 1. STDIO - For direct process-to-process communication
@@ -22,19 +22,18 @@ import path from "node:path";
 import { fileURLToPath } from 'node:url'; // Import fileURLToPath
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises"; // Import fs promises for directory creation
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { readFileSync } from "node:fs";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PersistentEventStore } from "./shared/persistentEventStore.js";
 import { z } from "zod";  // Schema validation library
-import { GoogleGenAI } from "@google/genai";
 import { CheerioCrawler, Configuration } from "crawlee";  // Web scraping library
-import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
 // Import cache modules using index file with .js extension
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
 // Import OAuth scopes documentation and middleware
 import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation.js";
-import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
+import { createOAuthMiddleware, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
 // Import robust YouTube transcript extractor
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 // Import SSRF protection
@@ -52,28 +51,16 @@ const SEARCH_TIMEOUT_MS = 10_000;
 /** Timeout for web page scraping and research-topic search phase */
 const SCRAPE_TIMEOUT_MS = 15_000;
 
-/** Timeout for Gemini AI analysis calls */
-const GEMINI_TIMEOUT_MS = 30_000;
-
-/** Timeout for Gemini analysis in the research workflow */
-const RESEARCH_ANALYSIS_TIMEOUT_MS = 45_000;
-
 /** Cache TTL for search results (30 minutes) */
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 
 /** Cache TTL for scraped page content (1 hour) */
 const SCRAPE_CACHE_TTL_MS = 60 * 60 * 1000;
 
-/** Cache TTL for Gemini AI analysis results (15 minutes) */
-const GEMINI_CACHE_TTL_MS = 15 * 60 * 1000;
-
 /** Maximum size for scraped page content (50 KB) */
 const MAX_SCRAPE_CONTENT_SIZE = 50 * 1024;
 
-/** Maximum input size for Gemini AI analysis (200 KB) */
-const MAX_GEMINI_INPUT_SIZE = 200 * 1024;
-
-/** Maximum combined content size for research workflow (300 KB) */
+/** Maximum combined content size for search_and_scrape workflow (300 KB) */
 const MAX_RESEARCH_COMBINED_SIZE = 300 * 1024;
 
 /** SSRF validation options, read once from environment variables */
@@ -111,6 +98,16 @@ function findProjectRoot(startDir: string): string {
 }
 
 const PROJECT_ROOT = findProjectRoot(__dirname);
+
+// --- Package Version ---
+const PKG_VERSION: string = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf-8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 // --- Default Paths ---
 const DEFAULT_CACHE_PATH = path.resolve(PROJECT_ROOT, 'storage', 'persistent_cache');
@@ -164,7 +161,7 @@ async function initializeGlobalInstances(
     persistenceStrategy: new HybridPersistenceStrategy(
       ['googleSearch', 'scrapePage'], // Critical namespaces
       5 * 60 * 1000, // 5 minutes persistence interval
-      ['googleSearch', 'scrapePage', 'analyzeWithGemini'] // All persistent namespaces
+      ['googleSearch', 'scrapePage'] // All persistent namespaces
     ),
     storagePath: cachePath,
     eagerLoading: true // Load all entries on startup
@@ -209,14 +206,10 @@ async function initializeGlobalInstances(
 /**
  * Configures and registers all MCP tools and resources for a server instance
  *
- * This factory function sets up:
- * 1. Individual tool implementations with caching
- * 2. Tool registration with the MCP server
- * 3. Composite tools that chain multiple operations
- * 4. Session-specific resources
- *
- * Each tool implementation is extracted into its own function to improve
- * readability and maintainability.
+ * Tools:
+ * 1. google_search — Google Custom Search API with recency filtering
+ * 2. scrape_page — Web scraping + YouTube transcript extraction
+ * 3. search_and_scrape — Composite: search → parallel scrape → combined raw content
  *
  * @param server - The MCP server instance to configure
  */
@@ -476,86 +469,7 @@ function configureToolsAndResources(
         return result;
     };
 
-    const gemini = new GoogleGenAI({
-        apiKey: process.env.GOOGLE_GEMINI_API_KEY!,
-    });
-
-    /**
-     * Analyzes text content using Google's Gemini AI models with timeout protection
-     *
-     * This function sends text to Gemini for analysis and caches the results.
-     * Useful for summarization, extraction, or other AI-powered text processing.
-     * Includes content size limits and timeout protection.
-     *
-     * @param text - The text content to analyze
-     * @param model - The Gemini model to use (default: gemini-2.0-flash-001)
-     * @returns The AI analysis result as a text content item
-     */
-    const analyzeWithGeminiFn = async ({
-        text,
-        model = "gemini-2.0-flash-001",
-    }: {
-        text: string;
-        model?: string;
-    }) => {
-        // Limit text size for Gemini analysis
-        let processedText = text;
-        
-        if (text.length > MAX_GEMINI_INPUT_SIZE) {
-            // Truncate intelligently - keep beginning and end with summary note
-            const halfSize = Math.floor(MAX_GEMINI_INPUT_SIZE / 2);
-            processedText = text.substring(0, halfSize) +
-                           "\n\n[... CONTENT TRUNCATED FOR API LIMITS - ANALYZE AVAILABLE CONTENT ...]\n\n" +
-                           text.substring(text.length - halfSize);
-            logger.info('Gemini input truncated', { from: text.length, to: processedText.length });
-        }
-
-        // Use a shorter TTL for AI analysis as the model may be updated
-        // Use the globally initialized cache instance directly
-        return globalCacheInstance.getOrCompute(
-            'analyzeWithGemini',
-            { text: processedText, model },
-            async () => {
-                logger.debug('Cache MISS for analyzeWithGemini', { preview: processedText.substring(0, 50) });
-                
-                // Add timeout protection for Gemini API calls
-                const geminiPromise = gemini.models.generateContent({
-                    model,
-                    contents: processedText,
-                });
-                
-                const r = await withTimeout(geminiPromise, GEMINI_TIMEOUT_MS, 'Gemini AI analysis');
-                return [{ type: "text" as const, text: r.text }];
-            },
-            {
-                ttl: GEMINI_CACHE_TTL_MS,
-                staleWhileRevalidate: true, // Enable stale-while-revalidate
-                staleTime: 5 * 60 * 1000 // Allow serving stale content for 5 more minutes while revalidating
-            }
-        );
-    };
-
     // 2) Register each tool with the MCP server
-    /**
-     * Enhanced Tool Registration System
-     *
-     * All tools are now registered with comprehensive MCP-compliant metadata:
-     *
-     * 1. **Detailed Descriptions**: Each parameter includes comprehensive descriptions
-     *    with usage examples, constraints, and optimization guidance
-     *
-     * 2. **Enhanced Annotations**: Improved titles with clear purpose statements,
-     *    proper readOnlyHint and openWorldHint values for LLM guidance
-     *
-     * 3. **Parameter Documentation**: Zod schemas enhanced with .describe() calls
-     *    providing specific examples, constraints, and best practices
-     *
-     * 4. **LLM-Friendly Format**: Descriptions written specifically for LLM
-     *    interpretation with clear use cases and workflow guidance
-     *
-     * This enhancement dramatically improves tool discoverability and reduces
-     * parameter usage errors by providing comprehensive context to LLMs.
-     */
     server.tool(
         "google_search",
         {
@@ -592,83 +506,38 @@ function configureToolsAndResources(
         }
     );
 
+    // 3) Composite tool: search_and_scrape
     server.tool(
-        "analyze_with_gemini",
+        "search_and_scrape",
         {
-            text: z.string().min(1).max(500000).describe("The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results."),
-            model: z.enum(["gemini-2.0-flash-001", "gemini-pro", "gemini-pro-vision"]).default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support)."),
+            query: z.string().min(1).max(500).describe("The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources."),
+            num_results: z.number().min(1).max(10).default(3).describe("Number of URLs to search for and scrape (1-10). More sources provide broader coverage but increase latency."),
+            include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs at the end of the output."),
         },
         {
-            title: "Gemini Analysis",
-            readOnlyHint: true,
-            openWorldHint: false
-        },
-        async ({ text, model = "gemini-2.0-flash-001" }) => ({ content: await analyzeWithGeminiFn({ text, model }) })
-    );
-
-    // 3) Create composite tools by chaining operations
-    /**
-     * Research Topic Tool - A comprehensive research workflow with enhanced descriptions
-     *
-     * This advanced composite tool implements a sophisticated research pipeline that:
-     * 1. Searches for information using Google Search (with timeout protection)
-     * 2. Scrapes content from discovered URLs (with graceful degradation)
-     * 3. Combines and manages content size intelligently
-     * 4. Analyzes the synthesized content with Gemini AI
-     *
-     * Features:
-     * - Resilient architecture with graceful degradation
-     * - Promise.allSettled for parallel processing with failure tolerance
-     * - Intelligent content size management and truncation
-     * - Comprehensive error reporting and success metrics
-     * - Individual operation timeouts for reliability
-     */
-    /** Depth presets: controls how many sources to scrape and whether to run Gemini analysis */
-    const DEPTH_PRESETS: Record<string, { maxSources: number; skipAnalysis: boolean; promptDetail: string }> = {
-        quick:    { maxSources: 2, skipAnalysis: true,  promptDetail: 'brief' },
-        standard: { maxSources: 3, skipAnalysis: false, promptDetail: 'standard' },
-        deep:     { maxSources: 5, skipAnalysis: false, promptDetail: 'detailed and thorough' },
-    };
-
-    server.tool(
-        "research_topic",
-        {
-            query: z.string().min(1).max(500).describe("The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results."),
-            num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze (1-5). More sources provide broader coverage."),
-            include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs to the output for verification."),
-            depth: z.enum(['quick', 'standard', 'deep']).default('standard').describe("Research depth. 'quick' = 2 sources, no AI analysis. 'standard' = 3 sources + Gemini analysis. 'deep' = 5 sources + detailed Gemini analysis."),
-            focus: z.string().max(200).optional().describe("Optional focus instruction to guide the AI analysis, e.g. 'focus on cost comparisons' or 'emphasize security implications'.")
-        },
-        {
-            title: "Research Topic",
+            title: "Search and Scrape",
             readOnlyHint: true,
             openWorldHint: true
         },
-        async ({ query, num_results, include_sources, depth, focus }) => {
+        async ({ query, num_results, include_sources }) => {
             const trimmedQuery = query.trim();
-            const preset = DEPTH_PRESETS[depth] ?? DEPTH_PRESETS.standard;
-            // Effective source count: min of user request, depth preset, and hard max
-            const effectiveSources = Math.min(num_results, preset.maxSources);
             const startTime = Date.now();
             const errors: string[] = [];
             let searchResults: any[] = [];
 
             try {
-                // A) Search with timeout protection
-                logger.info('Starting research', { query: trimmedQuery, effectiveSources, depth });
-                const searchPromise = googleSearchFn({ query: trimmedQuery, num_results: effectiveSources });
+                logger.info('search_and_scrape: searching', { query: trimmedQuery, num_results });
+                const searchPromise = googleSearchFn({ query: trimmedQuery, num_results });
                 searchResults = await withTimeout(searchPromise, SCRAPE_TIMEOUT_MS, 'Google Search');
-                logger.info('Search completed', { urlsFound: searchResults.length });
+                logger.info('search_and_scrape: search completed', { urlsFound: searchResults.length });
             } catch (error) {
                 const errorMsg = `Search failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
                 logger.warn(errorMsg);
-
-                // Return early if search fails completely
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research failed: Unable to search for "${trimmedQuery}". Error: ${errorMsg}`
+                        text: `Search failed for "${trimmedQuery}". Error: ${errorMsg}`
                     }]
                 };
             }
@@ -678,17 +547,16 @@ function configureToolsAndResources(
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research completed but no URLs found for query "${trimmedQuery}".`
+                        text: `No URLs found for query "${trimmedQuery}".`
                     }]
                 };
             }
 
-            // B) Scrape each URL with graceful degradation using Promise.allSettled
-            logger.info('Scraping URLs', { count: urls.length });
+            // Scrape each URL in parallel with graceful degradation
+            logger.info('search_and_scrape: scraping', { count: urls.length });
             const scrapePromises = urls.map(async (url, index) => {
                 try {
-                    const scrapePromise = scrapePageFn({ url });
-                    const result = await withTimeout(scrapePromise, 20000, `Scraping URL ${index + 1}`);
+                    const result = await withTimeout(scrapePageFn({ url }), 20000, `Scraping URL ${index + 1}`);
                     logger.debug(`Scraped URL ${index + 1}/${urls.length}`, { url: sanitizeUrl(url).substring(0, 80) });
                     return { url, result, success: true };
                 } catch (error) {
@@ -698,10 +566,8 @@ function configureToolsAndResources(
                 }
             });
 
-            // Use Promise.allSettled to handle partial failures gracefully
             const scrapeResults = await Promise.allSettled(scrapePromises);
 
-            // Process results and collect successful scrapes (with URL for attribution)
             const successfulScrapes: { url: string; content: string }[] = [];
             scrapeResults.forEach((result, index) => {
                 if (result.status === 'fulfilled') {
@@ -720,178 +586,55 @@ function configureToolsAndResources(
                 }
             });
 
-            logger.info('Scraping summary', { successful: successfulScrapes.length, total: urls.length });
+            logger.info('search_and_scrape: scraping done', { successful: successfulScrapes.length, total: urls.length });
 
-            // C) Check if we have enough content to analyze
             if (successfulScrapes.length === 0) {
                 const errorSummary = errors.length > 0 ? `\n\nErrors encountered:\n${errors.join('\n')}` : '';
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research failed: Unable to scrape any content from the ${urls.length} URLs found for "${trimmedQuery}".${errorSummary}`
+                        text: `No content could be scraped from the ${urls.length} URLs found for "${trimmedQuery}".${errorSummary}`
                     }]
                 };
             }
 
-            // D) Combine successful scrapes with size management and source attribution
-            const combinedSections = successfulScrapes.map((scrape, index) => {
-                return `=== Source ${index + 1}: ${scrape.url} ===\n${scrape.content}`;
-            });
+            // Combine scraped content with source headers
+            const combinedSections = successfulScrapes.map((scrape, index) =>
+                `=== Source ${index + 1}: ${scrape.url} ===\n${scrape.content}`
+            );
+            let finalCombined = combinedSections.join("\n\n---\n\n");
 
-            const combined = combinedSections.join("\n\n---\n\n");
-
-            // Limit total combined size before Gemini analysis
-            let finalCombined = combined;
-            if (combined.length > MAX_RESEARCH_COMBINED_SIZE) {
+            if (finalCombined.length > MAX_RESEARCH_COMBINED_SIZE) {
                 const halfSize = Math.floor(MAX_RESEARCH_COMBINED_SIZE / 2);
-                finalCombined = combined.substring(0, halfSize) +
-                               "\n\n[... CONTENT TRUNCATED FOR PROCESSING LIMITS ...]\n\n" +
-                               combined.substring(combined.length - halfSize);
-                logger.info('Combined content truncated', { from: combined.length, to: finalCombined.length });
+                finalCombined = finalCombined.substring(0, halfSize) +
+                               "\n\n[... CONTENT TRUNCATED FOR SIZE LIMITS ...]\n\n" +
+                               finalCombined.substring(finalCombined.length - halfSize);
+                logger.info('Combined content truncated', { from: combinedSections.join('').length, to: finalCombined.length });
             }
 
-            // Build the sources list for attribution
             const sourcesList = include_sources
                 ? '\n\n--- Sources ---\n' + successfulScrapes.map((s, i) => `${i + 1}. ${s.url}`).join('\n')
                 : '';
 
-            // E) For 'quick' depth, skip Gemini analysis and return raw content
-            if (preset.skipAnalysis) {
-                const totalTime = Date.now() - startTime;
-                logger.info('Research completed (quick mode)', { totalTime });
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: finalCombined + sourcesList + `\n\n--- Research Summary ---\nQuery: "${trimmedQuery}"\nDepth: ${depth}\nURLs scraped: ${successfulScrapes.length}/${urls.length}\nProcessing time: ${totalTime}ms`
-                    }]
-                };
+            const totalTime = Date.now() - startTime;
+            const summary = [
+                `\n\n--- Summary ---`,
+                `Query: "${trimmedQuery}"`,
+                `URLs scraped: ${successfulScrapes.length}/${urls.length}`,
+                `Processing time: ${totalTime}ms`,
+            ];
+            if (errors.length > 0) {
+                summary.push(`Errors: ${errors.length} (${errors.join('; ')})`);
             }
 
-            // F) Analyze with Gemini
-            try {
-                logger.info('Analyzing combined content', { size: finalCombined.length, depth });
-
-                // Build analysis prompt with optional focus instruction
-                let analysisPrompt = finalCombined;
-                if (focus) {
-                    analysisPrompt = `[ANALYSIS FOCUS: ${focus}]\n\n${analysisPrompt}`;
-                }
-                if (depth === 'deep') {
-                    analysisPrompt = `[Provide a ${preset.promptDetail} analysis covering key findings, patterns, contradictions, and implications.]\n\n${analysisPrompt}`;
-                }
-
-                const analysisPromiseGemini = analyzeWithGeminiFn({ text: analysisPrompt });
-                const analysis = await withTimeout(analysisPromiseGemini, RESEARCH_ANALYSIS_TIMEOUT_MS, 'Gemini analysis');
-
-                const totalTime = Date.now() - startTime;
-                logger.info('Research completed', { totalTime, depth });
-
-                // Append summary information to analysis
-                const summaryInfo = [
-                    `\n\n--- Research Summary ---`,
-                    `Query: "${trimmedQuery}"`,
-                    `Depth: ${depth}`,
-                    `URLs found: ${urls.length}`,
-                    `URLs successfully scraped: ${successfulScrapes.length}`,
-                    `Content size analyzed: ${finalCombined.length} characters`,
-                    `Total processing time: ${totalTime}ms`
-                ];
-
-                if (errors.length > 0) {
-                    summaryInfo.push(`Errors encountered: ${errors.length}`);
-                    summaryInfo.push(`Error details: ${errors.join('; ')}`);
-                }
-
-                const analysisText = analysis[0].text + sourcesList + summaryInfo.join('\n');
-
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: analysisText
-                    }]
-                };
-
-            } catch (error) {
-                const errorMsg = `Analysis failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
-                errors.push(errorMsg);
-                logger.warn(errorMsg);
-
-                // Return raw combined content if analysis fails
-                const fallbackContent = [
-                    `Research partially completed for "${trimmedQuery}" but analysis failed.`,
-                    ``,
-                    `Successfully scraped ${successfulScrapes.length}/${urls.length} URLs:`,
-                    ``,
-                    finalCombined,
-                    sourcesList,
-                    ``,
-                    `--- Issues Encountered ---`,
-                    errors.join('\n')
-                ].join('\n');
-
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: fallbackContent
-                    }]
-                };
-            }
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: finalCombined + sourcesList + summary.join('\n')
+                }]
+            };
         }
     );
-
-    // 4) Structured data extraction tool
-    /**
-     * Extract Structured Data Tool
-     *
-     * Uses Gemini AI to extract specific information from text based on a
-     * user-provided schema description. Useful for pulling entities, facts,
-     * or structured records out of unstructured text.
-     */
-    server.tool(
-        "extract_structured_data",
-        {
-            text: z.string().min(1).max(500000).describe("The text to extract structured data from."),
-            schema_description: z.string().min(1).max(2000).describe("A natural-language description of the data schema to extract. Example: 'Extract a list of companies mentioned, with their name, industry, and any revenue figures.'"),
-            model: z.enum(["gemini-2.0-flash-001", "gemini-pro", "gemini-pro-vision"]).default("gemini-2.0-flash-001").describe("The Gemini model to use for extraction.")
-        },
-        {
-            title: "Extract Structured Data",
-            readOnlyHint: true,
-            openWorldHint: false
-        },
-        async ({ text, schema_description, model }) => {
-            const extractionPrompt = [
-                `You are a data extraction assistant. Extract structured data from the text below according to the requested schema.`,
-                ``,
-                `REQUESTED SCHEMA:`,
-                schema_description,
-                ``,
-                `Return the extracted data as valid JSON. If a field cannot be determined, use null.`,
-                `If no matching data is found, return an empty array or object as appropriate.`,
-                ``,
-                `TEXT:`,
-                text,
-            ].join('\n');
-
-            return globalCacheInstance.getOrCompute(
-                'extractStructuredData',
-                { text: text.substring(0, 200), schema_description, model },
-                async () => {
-                    logger.debug('Extracting structured data', { schemaPreview: schema_description.substring(0, 80), model });
-                    const result = await analyzeWithGeminiFn({ text: extractionPrompt, model });
-                    return result;
-                },
-                {
-                    ttl: GEMINI_CACHE_TTL_MS,
-                    staleWhileRevalidate: true,
-                    staleTime: 5 * 60 * 1000
-                }
-            ).then(result => ({ content: result }));
-        }
-    );
-
-    // Session-specific resources are now registered in the session initialization handler
-    // This allows for better isolation between sessions and more explicit resource management
 }
 
 
@@ -910,7 +653,7 @@ async function setupStdioTransport() {
 
   stdioServerInstance = new McpServer({
     name: "google-researcher-mcp-stdio",
-    version: "1.0.0"
+    version: PKG_VERSION
   });
   // Configure tools using the global cache/store (implicitly via configureToolsAndResources)
   configureToolsAndResources(stdioServerInstance); // This function needs access to globalCacheInstance
@@ -946,12 +689,10 @@ export async function createAppAndHttpTransport(
  * The server requires the following environment variables:
  * - GOOGLE_CUSTOM_SEARCH_API_KEY: For Google search functionality
  * - GOOGLE_CUSTOM_SEARCH_ID: The custom search engine ID
- * - GOOGLE_GEMINI_API_KEY: For Gemini AI analysis
  */
 for (const key of [
     "GOOGLE_CUSTOM_SEARCH_API_KEY",
     "GOOGLE_CUSTOM_SEARCH_ID",
-    "GOOGLE_GEMINI_API_KEY"
 ]) {
     if (!process.env[key]) {
         logger.error(`Missing required env var ${key}`);
@@ -993,6 +734,24 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
   }));
   logger.info('Rate limiting configured', { windowMs: rateLimitWindowMs, max: rateLimitMax });
 
+  // ── Unauthenticated operational endpoints ─────────────────────
+  app.get("/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "ok",
+      version: PKG_VERSION,
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get("/version", (_req: Request, res: Response) => {
+    res.json({
+      version: PKG_VERSION,
+      name: "google-researcher-mcp",
+      nodeVersion: process.version,
+    });
+  });
+
   // Configure OAuth middleware if options are provided
   let oauthMiddleware: ReturnType<typeof createOAuthMiddleware> | undefined;
   if (oauthOptions) { // Use passed-in options
@@ -1015,7 +774,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
   // Create the MCP server
   const httpServer = new McpServer({
     name: "google-researcher-mcp-sse",
-    version: "1.0.0"
+    version: PKG_VERSION
   });
 
   // Configure tools and resources for the server (using the global function)
@@ -1391,6 +1150,35 @@ app.get("/mcp/oauth-token-info",
  */
 process.on('SIGINT', async () => {
     logger.info('Closing transports and persisting data before exit...');
+    try {
+        if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
+          await stdioTransportInstance.close();
+          logger.info('STDIO transport closed.');
+        }
+        if (httpTransportInstance && typeof httpTransportInstance.close === 'function') {
+          await httpTransportInstance.close();
+          logger.info('HTTP transport closed.');
+        }
+
+        if (globalCacheInstance && typeof globalCacheInstance.dispose === 'function') {
+          await globalCacheInstance.dispose();
+        } else {
+          logger.warn('globalCacheInstance dispose method not found or cache not available.');
+        }
+
+        if (eventStoreInstance && typeof eventStoreInstance.dispose === 'function') {
+            await eventStoreInstance.dispose();
+        } else {
+          logger.warn('eventStoreInstance dispose method not found or event store not available.');
+        }
+    } catch (error) {
+        logger.error('Error during graceful shutdown', { error: String(error) });
+    }
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    logger.info('Received SIGTERM. Closing transports and persisting data before exit...');
     try {
         if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
           await stdioTransportInstance.close();

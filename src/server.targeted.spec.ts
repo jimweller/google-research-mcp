@@ -15,23 +15,6 @@ import { PersistentEventStore } from './shared/persistentEventStore.js';
 import supertest from 'supertest';
 import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
-// Mock external dependencies with more detailed implementations
-jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({
-    models: {
-      generateContent: jest.fn(({ model, contents }) => {
-        // Simulate different responses based on input to cover more code paths
-        if (contents.includes('error')) {
-          return Promise.reject(new Error('Gemini API error'));
-        }
-        return Promise.resolve({ 
-          text: `Analyzed content: ${contents.substring(0, 50)}...` 
-        });
-      })
-    }
-  }))
-}));
-
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(({ requestHandler }) => ({
     run: jest.fn(async (urls) => {
@@ -240,16 +223,7 @@ describe('Targeted Server Coverage Tests', () => {
       expect(app).toBeDefined();
     });
 
-    it('should execute Gemini AI analysis with different content sizes', async () => {
-      const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-      
-      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
-      const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
-      expect(app).toBeDefined();
-    });
-
-    it('should execute research topic workflow end-to-end', async () => {
+    it('should execute search_and_scrape workflow end-to-end', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
       await initializeGlobalInstances(paths.cachePath, paths.eventPath);
@@ -297,16 +271,7 @@ describe('Targeted Server Coverage Tests', () => {
       expect(app).toBeDefined();
     });
 
-    it('should handle Gemini API failures gracefully', async () => {
-      const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-      
-      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
-      const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
-      expect(app).toBeDefined();
-    });
-
-    it('should handle timeout scenarios in research workflow', async () => {
+    it('should handle timeout scenarios in search_and_scrape workflow', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
       await initializeGlobalInstances(paths.cachePath, paths.eventPath);

@@ -58,7 +58,6 @@ jobs:
         CI: true
         GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
         GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
-        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
     - name: Run E2E tests (stdio)
       run: timeout 5m npm run test:e2e:stdio
@@ -68,7 +67,6 @@ jobs:
         CI: true
         GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
         GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
-        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
     - name: Run E2E tests (sse)
       run: timeout 5m npm run test:e2e:sse
@@ -78,7 +76,6 @@ jobs:
         CI: true
         GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
         GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
-        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
     - name: Run YouTube transcript E2E tests
       run: timeout 5m npm run test:e2e:youtube
@@ -86,7 +83,6 @@ jobs:
       env:
         NODE_ENV: test
         CI: true
-        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
     - name: Upload coverage reports
       if: matrix.node-version == '20.x'
@@ -210,7 +206,6 @@ jobs:
         NODE_ENV: test
         GOOGLE_CUSTOM_SEARCH_API_KEY: ${{ secrets.GOOGLE_CUSTOM_SEARCH_API_KEY }}
         GOOGLE_CUSTOM_SEARCH_ID: ${{ secrets.GOOGLE_CUSTOM_SEARCH_ID }}
-        GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
   docker:
     name: Docker Build

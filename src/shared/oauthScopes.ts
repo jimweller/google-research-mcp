@@ -36,26 +36,12 @@ export const TOOL_SCOPES = {
   SCRAPE_PAGE: 'mcp:tool:scrape_page:execute',
 
   /**
-   * Permission to execute the Analyze with Gemini tool
-   * 
-   * This scope allows clients to analyze text content using Google's Gemini AI models.
-   * Grant this scope to clients that need AI-powered text analysis capabilities.
+   * Permission to execute the Search and Scrape tool
+   *
+   * This scope allows clients to use the composite tool that searches Google
+   * and scrapes the top results in parallel, returning combined raw content.
    */
-  ANALYZE_WITH_GEMINI: 'mcp:tool:analyze_with_gemini:execute',
-
-  /**
-   * Permission to execute the Research Topic tool
-   * 
-   * This scope allows clients to use the composite research tool that chains:
-   * 1. Google Search
-   * 2. Page Scraping
-   * 3. Content Analysis with Gemini
-   * 
-   * Grant this scope to clients that need comprehensive research capabilities.
-   * Note: This scope implicitly requires the other tool scopes, but explicit checks
-   * should still be performed for each component tool.
-   */
-  RESEARCH_TOPIC: 'mcp:tool:research_topic:execute',
+  SEARCH_AND_SCRAPE: 'mcp:tool:search_and_scrape:execute',
 };
 
 /**
@@ -172,8 +158,7 @@ export const ENDPOINT_REQUIRED_SCOPES: Record<string, string[]> = {
   // Tool endpoints
   '/mcp/tool/google_search': [TOOL_SCOPES.GOOGLE_SEARCH],
   '/mcp/tool/scrape_page': [TOOL_SCOPES.SCRAPE_PAGE],
-  '/mcp/tool/analyze_with_gemini': [TOOL_SCOPES.ANALYZE_WITH_GEMINI],
-  '/mcp/tool/research_topic': [TOOL_SCOPES.RESEARCH_TOPIC],
+  '/mcp/tool/search_and_scrape': [TOOL_SCOPES.SEARCH_AND_SCRAPE],
 
   // Admin endpoints
   '/mcp/cache-stats': [ADMIN_SCOPES.CACHE_READ],
@@ -227,13 +212,9 @@ export const SCOPE_DOCUMENTATION: Record<string, { description: string, usage: s
     description: 'Allows scraping content from web pages and extracting YouTube transcripts',
     usage: 'Grant to clients that need to extract content from specific URLs'
   },
-  [TOOL_SCOPES.ANALYZE_WITH_GEMINI]: {
-    description: 'Allows analyzing text content using Google\'s Gemini AI models',
-    usage: 'Grant to clients that need AI-powered text analysis capabilities'
-  },
-  [TOOL_SCOPES.RESEARCH_TOPIC]: {
-    description: 'Allows using the composite research tool that chains search, scraping, and analysis',
-    usage: 'Grant to clients that need comprehensive research capabilities'
+  [TOOL_SCOPES.SEARCH_AND_SCRAPE]: {
+    description: 'Allows using the composite tool that searches Google and scrapes the top results',
+    usage: 'Grant to clients that need multi-source content gathering'
   },
 
   // Admin scopes

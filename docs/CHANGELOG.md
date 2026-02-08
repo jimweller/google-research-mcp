@@ -18,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **YouTube Transcripts**: Upgraded `@danielxceron/youtube-transcript` to ^1.2.6 to fix `playerCaptionsTracklistRenderer` extraction errors
 - **EventEmitter Leak**: Fixed process listener cleanup in `PersistentCache.dispose()` to prevent `MaxListenersExceededWarning`
 - **Jest Worker Exit**: Guarded STDIO transport initialization in test environments to prevent worker hang
-- **Flaky E2E Test**: Stabilized "Full research_topic workflow integration" test by removing dependency on Gemini response keywords
 
 ### Changed
 - **Zod Upgrade**: Upgraded Zod to ^3.25.0 for SDK compatibility
@@ -31,10 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced placeholder emails in CONTRIBUTING.md and CODE_OF_CONDUCT.md with GitHub security advisory links
 - Removed references to non-existent lint/format scripts in CONTRIBUTING.md
 
+## [6.0.0] - 2026-02-07
+
+### Removed
+- **Tool Simplification**: Removed `analyze_with_gemini`, `extract_structured_data` tools and the `@google/genai` dependency. The host LLM already has analysis capabilities — delegating to a second LLM was redundant and added confusion for tool selection.
+- **Gemini Dependency**: Fully removed `@google/genai` package and `GOOGLE_GEMINI_API_KEY` environment variable.
+
+### Changed
+- **Renamed `research_topic` to `search_and_scrape`**: Stripped Gemini analysis step; now returns combined raw scraped content with source attribution instead of an AI-generated summary.
+
+### Added
+- **Structured Logging**: Zero-dependency logger (`src/shared/logger.ts`) — JSON in production, human-readable in dev, silent in test.
+- **Enhanced Input Validation**: Stricter Zod schemas — `.min()`, `.max()` on all tool parameters.
+- **Rate Limiting**: `express-rate-limit` middleware on HTTP transport, keyed on `oauth.sub` or IP.
+- **Recency Filtering**: `time_range` parameter on `google_search` — `day`, `week`, `month`, `year`.
+- **Source Attribution**: `include_sources` parameter on `search_and_scrape` — appends numbered source URL list.
+- **Event Store Encryption**: Wired `EVENT_STORE_ENCRYPTION_KEY` env var to existing AES-256-GCM infrastructure.
+
 ## [1.2.1] - 2025-07-15
 
 ### Fixed
-- **Critical Scraping Issue**: Resolved a critical bug where `scrape_page` and `research_topic` tools were returning placeholder test content instead of actual scraped web data.
+- **Critical Scraping Issue**: Resolved a critical bug where `scrape_page` and the composite research tool were returning placeholder test content instead of actual scraped web data.
   - **Root Cause**: Removed problematic fallback mechanism that was adding dummy test content when scraped text was shorter than 100 characters.
   - **Impact**: Both tools now consistently return real web content, dramatically improving data quality and user experience.
   - **Verification**: Comprehensive testing confirmed tools now extract actual content from web pages and GitHub discussions.
@@ -99,8 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2025-07-06
 
 ### Added
-- **Timeout Protection & Reliability:** Implemented comprehensive timeout handling for all external API calls (`google_search`, `scrape_page`, `analyze_with_gemini`) to enhance stability and prevent connection errors.
-- **Graceful Degradation:** The `research_topic` tool now continues processing even if some sources fail, ensuring more resilient outcomes.
+- **Timeout Protection & Reliability:** Implemented comprehensive timeout handling for all external API calls to enhance stability and prevent connection errors.
+- **Graceful Degradation:** The composite research tool now continues processing even if some sources fail, ensuring more resilient outcomes.
 - **Resource Limiting:** Enforced content size limits to prevent resource exhaustion during scraping and analysis.
 - **Comprehensive Timeout Test Suite:** A new end-to-end test suite (`tests/e2e/comprehensive_timeout_test.js`) validates all timeout and error handling mechanisms.
 - **OAuth Endpoints:** Added public endpoints for OAuth configuration (`/mcp/oauth-config`) and scope documentation (`/mcp/oauth-scopes`), and an authenticated endpoint to inspect tokens (`/mcp/oauth-token-info`).

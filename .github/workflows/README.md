@@ -33,8 +33,6 @@ This repository uses GitHub Actions for CI/CD automation.
 | `NPM_TOKEN` | release, prerelease, rollback | NPM publishing authentication |
 | `GOOGLE_CUSTOM_SEARCH_API_KEY` | ci (E2E tests) | Google Custom Search API |
 | `GOOGLE_CUSTOM_SEARCH_ID` | ci (E2E tests) | Google Custom Search Engine ID |
-| `GOOGLE_GEMINI_API_KEY` | ci (E2E tests) | Google Gemini AI API key |
-
 `GITHUB_TOKEN` is provided automatically by GitHub Actions.
 
 ## Release Process

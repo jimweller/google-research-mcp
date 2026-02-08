@@ -23,8 +23,7 @@ describe('OAuth Scopes', () => {
     it('should define all required tool scopes', () => {
       expect(TOOL_SCOPES.GOOGLE_SEARCH).toBe('mcp:tool:google_search:execute');
       expect(TOOL_SCOPES.SCRAPE_PAGE).toBe('mcp:tool:scrape_page:execute');
-      expect(TOOL_SCOPES.ANALYZE_WITH_GEMINI).toBe('mcp:tool:analyze_with_gemini:execute');
-      expect(TOOL_SCOPES.RESEARCH_TOPIC).toBe('mcp:tool:research_topic:execute');
+      expect(TOOL_SCOPES.SEARCH_AND_SCRAPE).toBe('mcp:tool:search_and_scrape:execute');
     });
 
     it('should define all required admin scopes', () => {
@@ -113,7 +112,7 @@ describe('OAuth Scopes', () => {
       // Should have all tool scopes
       expect(hasRequiredScopes(toolsToken, [TOOL_SCOPES.GOOGLE_SEARCH])).toBe(true);
       expect(hasRequiredScopes(toolsToken, [TOOL_SCOPES.SCRAPE_PAGE])).toBe(true);
-      expect(hasRequiredScopes(toolsToken, [TOOL_SCOPES.ANALYZE_WITH_GEMINI])).toBe(true);
+      expect(hasRequiredScopes(toolsToken, [TOOL_SCOPES.SEARCH_AND_SCRAPE])).toBe(true);
       
       // Should not have admin scopes
       expect(hasRequiredScopes(toolsToken, [ADMIN_SCOPES.CACHE_READ])).toBe(false);
@@ -141,8 +140,7 @@ describe('OAuth Scopes', () => {
       // Check tool endpoints
       expect(ENDPOINT_REQUIRED_SCOPES['/mcp/tool/google_search']).toContain(TOOL_SCOPES.GOOGLE_SEARCH);
       expect(ENDPOINT_REQUIRED_SCOPES['/mcp/tool/scrape_page']).toContain(TOOL_SCOPES.SCRAPE_PAGE);
-      expect(ENDPOINT_REQUIRED_SCOPES['/mcp/tool/analyze_with_gemini']).toContain(TOOL_SCOPES.ANALYZE_WITH_GEMINI);
-      expect(ENDPOINT_REQUIRED_SCOPES['/mcp/tool/research_topic']).toContain(TOOL_SCOPES.RESEARCH_TOPIC);
+      expect(ENDPOINT_REQUIRED_SCOPES['/mcp/tool/search_and_scrape']).toContain(TOOL_SCOPES.SEARCH_AND_SCRAPE);
       
       // Check admin endpoints
       expect(ENDPOINT_REQUIRED_SCOPES['/mcp/cache-stats']).toContain(ADMIN_SCOPES.CACHE_READ);

@@ -20,15 +20,6 @@ import fs from 'node:fs/promises';
 import supertest from 'supertest';
 import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, cleanupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
-// Mock external dependencies
-jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({
-    models: {
-      generateContent: jest.fn(() => Promise.resolve({ text: 'Mock AI analysis result' }))
-    }
-  }))
-}));
-
 jest.mock('crawlee', () => ({
   CheerioCrawler: jest.fn().mockImplementation(() => ({
     run: jest.fn(() => Promise.resolve())
@@ -226,19 +217,11 @@ describe('Server Core Functionality', () => {
       expect(app).toBeDefined();
     });
 
-    it('should handle Gemini AI analysis', async () => {
+    it('should handle search_and_scrape workflow', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
 
-      // Test that Gemini AI analysis is configured
-      expect(app).toBeDefined();
-    });
-
-    it('should handle research topic workflow', async () => {
-      const { createAppAndHttpTransport } = await import('./server.js');
-      const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-
-      // Test that research topic workflow is configured
+      // Test that search_and_scrape workflow is configured
       expect(app).toBeDefined();
     });
   });
@@ -397,7 +380,6 @@ describe('Server Core Functionality', () => {
       const originalKeys = {
         GOOGLE_CUSTOM_SEARCH_API_KEY: process.env.GOOGLE_CUSTOM_SEARCH_API_KEY,
         GOOGLE_CUSTOM_SEARCH_ID: process.env.GOOGLE_CUSTOM_SEARCH_ID,
-        GOOGLE_GEMINI_API_KEY: process.env.GOOGLE_GEMINI_API_KEY
       };
 
       delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;

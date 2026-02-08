@@ -21,7 +21,6 @@ export class MCPEndToEndTest {
     for (const k of [
       "GOOGLE_CUSTOM_SEARCH_API_KEY",
       "GOOGLE_CUSTOM_SEARCH_ID",
-      "GOOGLE_GEMINI_API_KEY"
     ]) {
       if (!process.env[k]) {
         console.error(`❌ Missing env ${k}`);
@@ -49,7 +48,7 @@ export class MCPEndToEndTest {
     const { tools } = await this.client.listTools();
     assert.deepStrictEqual(
       tools.map((t) => t.name).sort(),
-      ["google_search", "scrape_page", "analyze_with_gemini", "research_topic", "extract_structured_data"].sort()
+      ["google_search", "scrape_page", "search_and_scrape"].sort()
     );
     console.log("✨ tools/list OK");
   }
@@ -88,39 +87,22 @@ export class MCPEndToEndTest {
   }
 
   /**
-   * Test Gemini analysis functionality
-   * @param {string} text - The text to analyze
-   * @returns {string} The analysis result
+   * Test search_and_scrape composite tool
+   * @returns {string} The combined scraped content
    */
-  async testAnalyzeWithGemini(text = "AI is transforming the world.") {
+  async testSearchAndScrape() {
     const {
-      content: [{ text: analysis }]
+      content: [{ text: combined }]
     } = await this.client.callTool({
-      name: "analyze_with_gemini",
-      arguments: { text }
-    });
-    assert(analysis.length > 0);
-    console.log("✨ analyze_with_gemini OK");
-    return analysis;
-  }
-
-  /**
-   * Test research topic functionality
-   * @returns {string} The research summary
-   */
-  async testResearchTopic() {
-    const {
-      content: [{ text: summary }]
-    } = await this.client.callTool({
-      name: "research_topic",
+      name: "search_and_scrape",
       arguments: {
-        query: "How do you integrate YouTube and Gemini API?",
-        num_results: 3
+        query: "JavaScript async await",
+        num_results: 2
       }
     });
-    assert(summary.length > 0);
-    console.log("✨ research_topic OK");
-    return summary;
+    assert(combined.length > 0);
+    console.log("✨ search_and_scrape OK");
+    return combined;
   }
 
   /**
@@ -140,36 +122,18 @@ export class MCPEndToEndTest {
   }
 
   /**
-   * Test transcript analysis functionality
-   * @param {string} transcript - The transcript to analyze
-   */
-  async testTranscriptAnalysis(transcript) {
-    const {
-      content: [{ text: ta }]
-    } = await this.client.callTool({
-      name: "analyze_with_gemini",
-      arguments: { text: transcript.slice(0, 200) }
-    });
-    assert(ta.length > 0);
-    console.log("✨ Transcript analysis OK");
-    return ta;
-  }
-
-  /**
    * Run all tests in sequence
    */
   async runAllTests() {
     this.checkEnvironmentVariables();
-    
+
     // Run all test steps
     await this.listTools();
     const url = await this.testGoogleSearch();
     await this.testScrapePage(url);
-    await this.testAnalyzeWithGemini();
-    await this.testResearchTopic();
-    const transcript = await this.testYouTubeTranscript();
-    await this.testTranscriptAnalysis(transcript);
-    
+    await this.testSearchAndScrape();
+    await this.testYouTubeTranscript();
+
     console.log(`🎉 All ${this.transportType}-based end-to-end tests passed!`);
   }
 

@@ -24,8 +24,8 @@ class BatchRequestTest extends MCPEndToEndTest {
         arguments: { query: "example.com", num_results: 1 }
       }),
       this.client.callTool({
-        name: "analyze_with_gemini",
-        arguments: { text: "AI is transforming the world." }
+        name: "scrape_page",
+        arguments: { url: "https://example.com" }
       })
     ]);
     
