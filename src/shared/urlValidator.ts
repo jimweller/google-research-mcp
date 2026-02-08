@@ -7,6 +7,10 @@
  * - Link-local addresses
  * - Cloud metadata endpoints
  * - Non-HTTP(S) protocols
+ *
+ * Configurable via environment variables:
+ * - ALLOW_PRIVATE_IPS=true  — skip private IP checks (for local dev)
+ * - ALLOWED_DOMAINS=a.com,b.com — restrict scraping to listed domains
  */
 
 import { lookup } from 'node:dns/promises';
@@ -26,6 +30,16 @@ export class SSRFProtectionError extends Error {
     super(`URL blocked by SSRF protection: ${reason} (hostname: ${hostname})`);
     this.name = 'SSRFProtectionError';
   }
+}
+
+/**
+ * Options for SSRF URL validation behavior.
+ */
+export interface SSRFValidationOptions {
+  /** When true, skip private/reserved IP checks (protocol and metadata hostname checks still apply). */
+  allowPrivateIPs?: boolean;
+  /** When set, only these domains (and their subdomains) are allowed. */
+  allowedDomains?: string[];
 }
 
 /**
@@ -77,7 +91,10 @@ const BLOCKED_HOSTNAMES = new Set([
  * Validates a URL for SSRF protection.
  * Throws SSRFProtectionError if the URL targets a private/internal resource.
  */
-export async function validateUrlForSSRF(urlString: string): Promise<void> {
+export async function validateUrlForSSRF(
+  urlString: string,
+  options: SSRFValidationOptions = {}
+): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(urlString);
@@ -90,33 +107,48 @@ export async function validateUrlForSSRF(urlString: string): Promise<void> {
     throw new SSRFProtectionError(urlString, `Protocol '${parsed.protocol}' is not allowed`);
   }
 
-  // 2. Block known metadata hostnames
   const hostname = parsed.hostname.toLowerCase();
+
+  // 2. Domain allowlist check (if configured)
+  if (options.allowedDomains && options.allowedDomains.length > 0) {
+    const domainAllowed = options.allowedDomains.some(allowed => {
+      const norm = allowed.toLowerCase();
+      return hostname === norm || hostname.endsWith('.' + norm);
+    });
+    if (!domainAllowed) {
+      throw new SSRFProtectionError(
+        urlString,
+        `Domain '${hostname}' is not in the allowed domains list`
+      );
+    }
+  }
+
+  // 3. Block known metadata hostnames
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new SSRFProtectionError(urlString, `Hostname '${hostname}' is blocked`);
   }
 
-  // 3. If hostname is an IP literal, check directly
+  // 4. If hostname is an IP literal, check directly
   // URL parser keeps brackets for IPv6 (e.g. "[::1]"), strip them for isIP check
   const bareHostname = hostname.startsWith('[') && hostname.endsWith(']')
     ? hostname.slice(1, -1)
     : hostname;
 
   if (isIP(bareHostname)) {
-    if (isPrivateIP(bareHostname)) {
+    if (!options.allowPrivateIPs && isPrivateIP(bareHostname)) {
       throw new SSRFProtectionError(urlString, 'IP address is in a private/reserved range');
     }
     return;
   }
 
-  // 4. DNS resolution — check all returned IPs
+  // 5. DNS resolution — check all returned IPs
   try {
     const result = await lookup(hostname, { all: true });
     const addresses = Array.isArray(result) ? result : [result];
 
     for (const addr of addresses) {
       const address = typeof addr === 'string' ? addr : addr.address;
-      if (isPrivateIP(address)) {
+      if (!options.allowPrivateIPs && isPrivateIP(address)) {
         throw new SSRFProtectionError(
           urlString,
           `Hostname '${hostname}' resolves to private IP`
@@ -127,4 +159,22 @@ export async function validateUrlForSSRF(urlString: string): Promise<void> {
     if (error instanceof SSRFProtectionError) throw error;
     // DNS failure — let the actual fetch fail with a network error
   }
+}
+
+/**
+ * Builds SSRFValidationOptions from environment variables.
+ *
+ * Reads:
+ * - ALLOW_PRIVATE_IPS: "true" to skip private IP blocking
+ * - ALLOWED_DOMAINS: Comma-separated list of allowed domains (e.g., "example.com,github.com")
+ */
+export function getSSRFOptionsFromEnv(): SSRFValidationOptions {
+  const allowPrivateIPs = process.env.ALLOW_PRIVATE_IPS?.toLowerCase() === 'true';
+
+  const raw = process.env.ALLOWED_DOMAINS?.trim();
+  const allowedDomains = raw
+    ? raw.split(',').map(d => d.trim()).filter(Boolean)
+    : undefined;
+
+  return { allowPrivateIPs, allowedDomains };
 }

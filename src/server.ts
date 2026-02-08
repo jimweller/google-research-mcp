@@ -38,7 +38,7 @@ import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./
 // Import robust YouTube transcript extractor
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 // Import SSRF protection
-import { validateUrlForSSRF, SSRFProtectionError } from "./shared/urlValidator.js";
+import { validateUrlForSSRF, SSRFProtectionError, getSSRFOptionsFromEnv } from "./shared/urlValidator.js";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -71,6 +71,9 @@ const MAX_GEMINI_INPUT_SIZE = 200 * 1024;
 
 /** Maximum combined content size for research workflow (300 KB) */
 const MAX_RESEARCH_COMBINED_SIZE = 300 * 1024;
+
+/** SSRF validation options, read once from environment variables */
+const SSRF_OPTIONS = getSSRFOptionsFromEnv();
 
 // ────────────────────────────────────────────────────────────────
 
@@ -317,7 +320,7 @@ function configureToolsAndResources(
     const scrapePageFn = async ({ url }: { url: string }) => {
         // SSRF protection: validate URL before any network access
         try {
-            await validateUrlForSSRF(url);
+            await validateUrlForSSRF(url, SSRF_OPTIONS);
         } catch (error) {
             if (error instanceof SSRFProtectionError) {
                 return [{ type: "text" as const, text: `URL blocked: ${error.message}` }];
@@ -375,6 +378,24 @@ function configureToolsAndResources(
                             // Combine all content to ensure we have enough text
                             page = `Title: ${title}\nHeadings: ${headings}\nParagraphs: ${paragraphs}\nBody: ${bodyText}`;
                         },
+                        // Validate redirect targets against SSRF rules
+                        preNavigationHooks: [
+                            async (_crawlingContext, gotOptions) => {
+                                if (!gotOptions.hooks) {
+                                    gotOptions.hooks = {};
+                                }
+                                const existing = gotOptions.hooks.beforeRedirect ?? [];
+                                gotOptions.hooks.beforeRedirect = [
+                                    ...existing,
+                                    async (redirectOptions: any) => {
+                                        const redirectUrl = redirectOptions.url?.toString();
+                                        if (redirectUrl) {
+                                            await validateUrlForSSRF(redirectUrl, SSRF_OPTIONS);
+                                        }
+                                    },
+                                ];
+                            },
+                        ],
                         // Add timeout configuration to crawler
                         requestHandlerTimeoutSecs: 15, // 15 second timeout
                         maxRequestsPerCrawl: 1, // Only process the single URL

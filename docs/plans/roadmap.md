@@ -36,7 +36,7 @@ This section outlines the critical tasks that must be completed before the serve
 
 | Priority | Task                               | Status      | Risk   | Details                                                              |
 | :---     | :---                               | :---        | :---   | :---                                                                 |
-| **P1**   | **SSRF Mitigation**                | 🚨 **Open** | **High** | Implement allow-listing and network controls for the `scrape_page` tool. |
+| **P1**   | **SSRF Mitigation**                | ✅ **Done** | **High** | Protocol checks, private IP blocking (configurable via `ALLOW_PRIVATE_IPS`), domain allowlist (`ALLOWED_DOMAINS`), redirect validation, cloud metadata blocking. |
 | **P1**   | **Production Secrets Management**  | 🚨 **Open** | **High** | Move from `.env` to a secure secret management system (e.g., Vault). |
 | **P1**   | **Rate Limiting**                  | 🚨 **Open** | **Medium** | Implement per-user/IP rate limiting to prevent abuse and DoS attacks.    |
 | **P2**   | **Enhanced Input Validation**      | ⚠️ **Open** | **Medium** | Go beyond basic Zod schemas to implement stricter input sanitization.  |
