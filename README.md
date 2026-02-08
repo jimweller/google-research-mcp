@@ -175,6 +175,7 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
 ### Prerequisites
 
 - **Node.js**: Version 20.0.0 or higher.
+- **Chromium** (for JavaScript rendering): Installed automatically via `npx playwright install chromium` during setup.
 - **API Keys**:
   - [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction)
   - [Google Custom Search Engine ID](https://programmablesearchengine.google.com/)
@@ -191,6 +192,7 @@ For complete technical details, see the [YouTube Transcript Extraction Documenta
 2.  **Install Dependencies**:
     ```bash
     npm install
+    npx playwright install chromium
     ```
 
 3.  **Configure Environment Variables**:

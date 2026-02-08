@@ -17,16 +17,43 @@ COPY src/ ./src/
 RUN npm run build
 
 # ── Stage 2: Production ──────────────────────────────────────
-FROM node:20-alpine AS production
+# Using node:20-slim (Debian) instead of Alpine because Playwright/Chromium
+# requires glibc and system libraries not available on Alpine.
+FROM node:20-slim AS production
 
 WORKDIR /app
 
+# Install Playwright Chromium system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # Add a non-root user for security
-RUN addgroup -S mcp && adduser -S mcp -G mcp
+RUN groupadd -r mcp && useradd -r -g mcp mcp
 
 # Copy package files and install production-only dependencies
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
+
+# Install only Chromium browser for Playwright
+RUN npx playwright install chromium
 
 # Copy built output from builder stage
 COPY --from=builder /app/dist/ ./dist/

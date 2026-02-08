@@ -28,7 +28,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PersistentEventStore } from "./shared/persistentEventStore.js";
 import { z } from "zod";  // Schema validation library
-import { CheerioCrawler, Configuration } from "crawlee";  // Web scraping library
+import { CheerioCrawler, PlaywrightCrawler, Configuration } from "crawlee";  // Web scraping library
 // Import cache modules using index file with .js extension
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
 // Import OAuth scopes documentation and middleware
@@ -50,6 +50,12 @@ const SEARCH_TIMEOUT_MS = 10_000;
 
 /** Timeout for web page scraping and research-topic search phase */
 const SCRAPE_TIMEOUT_MS = 15_000;
+
+/** Minimum content length to consider a Cheerio scrape successful (bytes) */
+const MIN_CHEERIO_CONTENT_LENGTH = 100;
+
+/** Timeout for Playwright-based scraping (seconds) */
+const PLAYWRIGHT_TIMEOUT_SECS = 20;
 
 /** Cache TTL for search results (30 minutes) */
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -350,6 +356,84 @@ function configureToolsAndResources(
      * @param url - The URL to scrape
      * @returns The page content as a text content item
      */
+
+    /**
+     * Scrape a URL using CheerioCrawler (static HTML only, fast).
+     */
+    async function scrapeWithCheerio(url: string): Promise<string> {
+        let page = "";
+        const crawler = new CheerioCrawler({
+            requestHandler: async ({ $ }) => {
+                if (typeof $ !== 'function') {
+                    page = "[Non-HTML response — content could not be extracted]";
+                    return;
+                }
+                const title = $("title").text() || "";
+                const headings = $("h1, h2, h3").map((_, el) => $(el).text()).get().join(" ");
+                const paragraphs = $("p").map((_, el) => $(el).text()).get().join(" ");
+                const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+                page = `Title: ${title}\nHeadings: ${headings}\nParagraphs: ${paragraphs}\nBody: ${bodyText}`;
+            },
+            preNavigationHooks: [
+                async (_crawlingContext, gotOptions) => {
+                    if (!gotOptions.hooks) { gotOptions.hooks = {}; }
+                    const existing = gotOptions.hooks.beforeRedirect ?? [];
+                    gotOptions.hooks.beforeRedirect = [
+                        ...existing,
+                        async (redirectOptions: any) => {
+                            const redirectUrl = redirectOptions.url?.toString();
+                            if (redirectUrl) {
+                                await validateUrlForSSRF(redirectUrl, SSRF_OPTIONS);
+                            }
+                        },
+                    ];
+                },
+            ],
+            useSessionPool: false,
+            persistCookiesPerSession: false,
+            requestHandlerTimeoutSecs: 15,
+            maxRequestsPerCrawl: 1,
+            maxRequestRetries: 0,
+        });
+        const crawlPromise = crawler.run([{ url }]);
+        await withTimeout(crawlPromise, SCRAPE_TIMEOUT_MS, 'Web page scraping');
+        return page;
+    }
+
+    /**
+     * Scrape a URL using PlaywrightCrawler (renders JavaScript, slower).
+     * Used as a fallback when CheerioCrawler returns insufficient content.
+     */
+    async function scrapeWithPlaywright(url: string): Promise<string> {
+        let pageContent = "";
+        const crawler = new PlaywrightCrawler({
+            requestHandler: async ({ page }) => {
+                await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+                const title = await page.title();
+                const extracted = await page.evaluate(() => {
+                    const h = Array.from(document.querySelectorAll('h1, h2, h3'))
+                        .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
+                    const p = Array.from(document.querySelectorAll('p'))
+                        .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
+                    const body = document.body?.innerText?.replace(/\s+/g, ' ').trim() || '';
+                    return { headings: h, paragraphs: p, bodyText: body };
+                });
+                pageContent = `Title: ${title}\nHeadings: ${extracted.headings}\nParagraphs: ${extracted.paragraphs}\nBody: ${extracted.bodyText}`;
+            },
+            requestHandlerTimeoutSecs: PLAYWRIGHT_TIMEOUT_SECS,
+            maxRequestsPerCrawl: 1,
+            maxRequestRetries: 0,
+            useSessionPool: false,
+            headless: true,
+            launchContext: {
+                launchOptions: { args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'] }
+            },
+        });
+        const crawlPromise = crawler.run([{ url }]);
+        await withTimeout(crawlPromise, PLAYWRIGHT_TIMEOUT_SECS * 1000, 'Playwright scraping');
+        return pageContent;
+    }
+
     const scrapePageFn = async ({ url }: { url: string }) => {
         // SSRF protection: validate URL before any network access
         try {
@@ -391,55 +475,15 @@ function configureToolsAndResources(
                         );
                     }
                 } else {
-                    // Regular web scraping logic remains unchanged
-                    let page = "";
-                    const crawler = new CheerioCrawler({
-                        requestHandler: async ({ $ }) => {
-                            // Guard against non-HTML responses (e.g. JSON APIs) where
-                            // Cheerio can't parse the body and $ is undefined.
-                            if (typeof $ !== 'function') {
-                                page = "[Non-HTML response — content could not be extracted]";
-                                return;
-                            }
-                            const title = $("title").text() || "";
-                            const headings = $("h1, h2, h3").map((_, el) => $(el).text()).get().join(" ");
-                            const paragraphs = $("p").map((_, el) => $(el).text()).get().join(" ");
-                            const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+                    // Tiered scraping: try fast static HTML first, fall back to JS rendering
+                    text = await scrapeWithCheerio(url);
 
-                            page = `Title: ${title}\nHeadings: ${headings}\nParagraphs: ${paragraphs}\nBody: ${bodyText}`;
-                        },
-                        // Validate redirect targets against SSRF rules
-                        preNavigationHooks: [
-                            async (_crawlingContext, gotOptions) => {
-                                if (!gotOptions.hooks) {
-                                    gotOptions.hooks = {};
-                                }
-                                const existing = gotOptions.hooks.beforeRedirect ?? [];
-                                gotOptions.hooks.beforeRedirect = [
-                                    ...existing,
-                                    async (redirectOptions: any) => {
-                                        const redirectUrl = redirectOptions.url?.toString();
-                                        if (redirectUrl) {
-                                            await validateUrlForSSRF(redirectUrl, SSRF_OPTIONS);
-                                        }
-                                    },
-                                ];
-                            },
-                        ],
-                        // Disable session pool and cookie persistence — we do single-page
-                        // scrapes and don't need cross-request session tracking.
-                        useSessionPool: false,
-                        persistCookiesPerSession: false,
-                        // Timeout and retry configuration for single-page scrapes
-                        requestHandlerTimeoutSecs: 15,
-                        maxRequestsPerCrawl: 1,
-                        maxRequestRetries: 0, // No retries — we have our own timeout wrapper
-                    });
-                    
-                    // Add timeout protection for web scraping
-                    const crawlPromise = crawler.run([{ url }]);
-                    await withTimeout(crawlPromise, SCRAPE_TIMEOUT_MS, 'Web page scraping');
-                    text = page;
+                    if (text.length < MIN_CHEERIO_CONTENT_LENGTH) {
+                        logger.info('Cheerio returned insufficient content, falling back to Playwright', {
+                            url: sanitizeUrl(url), cheerioLength: text.length
+                        });
+                        text = await scrapeWithPlaywright(url);
+                    }
                 }
 
                 // Limit content size to prevent memory issues

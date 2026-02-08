@@ -58,6 +58,9 @@ jest.mock('crawlee', () => ({
       return Promise.resolve();
     })
   })),
+  PlaywrightCrawler: jest.fn().mockImplementation(() => ({
+    run: jest.fn(() => Promise.resolve())
+  })),
   Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) }
 }));
 

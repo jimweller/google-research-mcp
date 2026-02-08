@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **JavaScript Rendering**: `scrape_page` now renders JavaScript-heavy pages (React, Next.js, SPAs) via a Playwright fallback when static HTML extraction returns insufficient content. Static pages still use the fast CheerioCrawler path.
+
 ### Security
 - **SDK Upgrade**: Upgraded `@modelcontextprotocol/sdk` from 1.11.0 to ^1.26.0, fixing cross-client data leak (GHSA-345p-7cg4-v4c7)
 - **SSRF Protection**: Added URL validation to block private IPs, metadata endpoints, and non-HTTP protocols in `scrape_page`
