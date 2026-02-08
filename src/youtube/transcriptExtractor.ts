@@ -119,13 +119,15 @@ export class ConsoleLogger implements Logger {
   }
 
   warn(message: string, meta?: any): void {
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
       console.warn(`[YouTube Transcript Warning] ${message}`, meta ? JSON.stringify(meta) : '');
     }
   }
 
   error(message: string, meta?: any): void {
-    console.error(`[YouTube Transcript Error] ${message}`, meta ? JSON.stringify(meta) : '');
+    if (process.env.NODE_ENV !== 'test') {
+      console.error(`[YouTube Transcript Error] ${message}`, meta ? JSON.stringify(meta) : '');
+    }
   }
 }
 
