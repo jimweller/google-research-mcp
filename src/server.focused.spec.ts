@@ -9,12 +9,10 @@
  * - Middleware and request handling (lines 789, 803-806, 815, 876, 888)
  */
 
-import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import { PersistentCache, HybridPersistenceStrategy } from './cache/index.js';
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
+import { PersistentCache } from './cache/index.js';
 import { PersistentEventStore } from './shared/persistentEventStore.js';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
 // Mock external dependencies to avoid network calls and complex integrations
 jest.mock('@google/genai', () => ({
@@ -66,52 +64,38 @@ global.fetch = jest.fn(() => Promise.resolve({
   })
 })) as any;
 
-// Helper to get __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('Focused Server Coverage Tests', () => {
   let testCache: PersistentCache;
   let testEventStore: PersistentEventStore;
-  const testStorageDir = path.resolve(__dirname, '..', 'storage', 'test_temp', `focused-server-spec-${Date.now()}`);
-  const testCachePath = path.join(testStorageDir, 'cache');
-  const testEventPath = path.join(testStorageDir, 'events');
+  const paths = createTestStoragePaths('focused-server-spec', import.meta.url);
 
   beforeAll(async () => {
     // Setup test environment
-    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'test-api-key';
-    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'test-search-id';
-    process.env.GOOGLE_GEMINI_API_KEY = 'test-gemini-key';
-    process.env.NODE_ENV = 'test';
+    setupTestEnv({ NODE_ENV: 'test' });
 
     // Ensure test storage directory exists
-    await fs.mkdir(testStorageDir, { recursive: true });
+    await ensureTestStorageDirs(paths);
   });
 
   afterAll(async () => {
     // Cleanup test resources
-    if (testCache) {
-      await testCache.dispose();
-    }
-    if (testEventStore) {
-      await testEventStore.dispose();
-    }
-    await fs.rm(testStorageDir, { recursive: true, force: true });
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
+    await cleanupTestStorage(paths);
+    cleanupProcessListeners();
+  });
+
+  afterEach(async () => {
+    // Dispose instances before next beforeEach creates new ones
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
   });
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    
+
     // Create fresh instances for each test
-    testCache = new PersistentCache({
-      storagePath: testCachePath,
-      persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-      eagerLoading: false
-    });
-    testEventStore = new PersistentEventStore({
-      storagePath: testEventPath,
-      eagerLoading: false
-    });
+    const instances = createTestInstances(paths);
+    testCache = instances.cache;
+    testEventStore = instances.eventStore;
   });
 
   describe('Tool Function Coverage', () => {
@@ -120,7 +104,7 @@ describe('Focused Server Coverage Tests', () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
       // Initialize global instances before creating app
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // Create app to register tools (this covers tool registration lines)
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
@@ -135,7 +119,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should cover web scraping function implementation', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       // Verify Crawlee mock was set up (indicates scraping setup was covered)
@@ -145,7 +129,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should cover Gemini AI analysis function implementation', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       // Verify GoogleGenAI mock was set up (indicates AI analysis setup was covered)
@@ -155,7 +139,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should cover YouTube transcript extraction', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       // Verify YouTube transcript mock was set up
@@ -171,7 +155,7 @@ describe('Focused Server Coverage Tests', () => {
       );
 
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       expect(app).toBeDefined();
@@ -189,7 +173,7 @@ describe('Focused Server Coverage Tests', () => {
 
       try {
         const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-        await initializeGlobalInstances(testCachePath, testEventPath);
+        await initializeGlobalInstances(paths.cachePath, paths.eventPath);
         await createAppAndHttpTransport(testCache, testEventStore);
         
         // Should have called process.exit(1)
@@ -206,7 +190,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should setup HTTP transport correctly', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app, httpTransport } = await createAppAndHttpTransport(testCache, testEventStore);
       
       expect(app).toBeDefined();
@@ -218,7 +202,7 @@ describe('Focused Server Coverage Tests', () => {
       process.env.ALLOWED_ORIGINS = 'http://localhost:3000,https://example.com';
       
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       expect(app).toBeDefined();
@@ -230,7 +214,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should handle OAuth middleware configuration', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // Test with OAuth options
       const oauthOptions = {
@@ -249,7 +233,7 @@ describe('Focused Server Coverage Tests', () => {
       const { initializeGlobalInstances } = await import('./server.js');
       
       // Test initialization
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // The fact that this doesn't throw indicates successful initialization
       expect(true).toBe(true);
@@ -268,7 +252,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should handle content size limits', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // Mock very large content to test truncation logic
       const largeMockContent = 'x'.repeat(100000); // 100KB content
@@ -290,7 +274,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should handle timeout scenarios', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // Mock slow response to test timeout handling
       (global.fetch as jest.Mock).mockImplementationOnce(() =>
@@ -312,7 +296,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should use cache for operations', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       
       // Spy on cache methods to verify they're called
       const getOrComputeSpy = jest.spyOn(testCache, 'getOrCompute');
@@ -326,7 +310,7 @@ describe('Focused Server Coverage Tests', () => {
     it('should handle cache statistics', async () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
       
-      await initializeGlobalInstances(testCachePath, testEventPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
       // The app should have cache stats functionality

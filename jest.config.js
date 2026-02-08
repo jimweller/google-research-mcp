@@ -5,6 +5,7 @@ export default {
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^@danielxceron/youtube-transcript$': '<rootDir>/node_modules/@danielxceron/youtube-transcript/dist/youtube-transcript.common.js',
   },
   transform: {
     '^.+\\.tsx?$': [

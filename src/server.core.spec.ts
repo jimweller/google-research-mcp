@@ -12,14 +12,13 @@
 
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { Express } from 'express';
-import { PersistentCache, HybridPersistenceStrategy } from './cache/index.js';
+import { PersistentCache } from './cache/index.js';
 import { PersistentEventStore } from './shared/persistentEventStore.js';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import path from 'node:path';
 import fs from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import supertest from 'supertest';
+import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, cleanupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
 // Mock external dependencies
 jest.mock('@google/genai', () => ({
@@ -68,86 +67,48 @@ if (!global.AbortSignal.timeout) {
   });
 }
 
-// Helper to get __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const paths = createTestStoragePaths('server-core-spec', import.meta.url);
 
 describe('Server Core Functionality', () => {
   let testCache: PersistentCache;
   let testEventStore: PersistentEventStore;
-  const testStorageDir = path.resolve(__dirname, '..', 'storage', 'test_temp', `server-core-spec-${Date.now()}`);
-  const testCachePath = path.join(testStorageDir, 'cache');
-  const testEventPath = path.join(testStorageDir, 'events');
-  const testRequestQueuesPath = path.join(testStorageDir, 'request_queues');
 
   beforeAll(async () => {
     // Setup test environment variables
-    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'test-api-key';
-    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'test-search-id';
-    process.env.GOOGLE_GEMINI_API_KEY = 'test-gemini-key';
-    process.env.NODE_ENV = 'test'; // Ensure test environment
+    setupTestEnv({ NODE_ENV: 'test' });
 
     // Ensure test storage directory exists
-    await fs.mkdir(testStorageDir, { recursive: true });
-    await fs.mkdir(path.dirname(testCachePath), { recursive: true });
-    await fs.mkdir(path.dirname(testEventPath), { recursive: true });
-    await fs.mkdir(testRequestQueuesPath, { recursive: true });
+    await ensureTestStorageDirs(paths);
   });
 
   afterAll(async () => {
     // Cleanup test resources
-    if (testCache) {
-      await testCache.dispose();
-    }
-    if (testEventStore) {
-      await testEventStore.dispose();
-    }
-    
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
+
     // Clean up any remaining directories
-    try {
-      await fs.rm(testStorageDir, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors in tests
-      console.warn('Test cleanup warning:', error.message);
-    }
+    await cleanupTestStorage(paths);
 
     // Clear environment variables
-    delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
-    delete process.env.GOOGLE_CUSTOM_SEARCH_ID;
-    delete process.env.GOOGLE_GEMINI_API_KEY;
-    
-    // Remove any SIGINT listeners to prevent memory leaks
-    process.removeAllListeners('SIGINT');
+    cleanupTestEnv();
+
+    // Remove all process listeners to prevent memory leaks
+    cleanupProcessListeners();
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
     // Reset any module-level state that might interfere between tests
-    process.removeAllListeners('SIGINT');
+    cleanupProcessListeners();
   });
 
   afterEach(async () => {
     // Cleanup any test-specific resources
-    if (testCache && typeof testCache.dispose === 'function') {
-      try {
-        await testCache.dispose();
-      } catch (error) {
-        // Ignore disposal errors in tests
-      }
-    }
-    if (testEventStore && typeof testEventStore.dispose === 'function') {
-      try {
-        await testEventStore.dispose();
-      } catch (error) {
-        // Ignore disposal errors in tests
-      }
-    }
-    // Reset test instances
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
     testCache = null;
     testEventStore = null;
-    
-    // Clean up any listeners to prevent memory leaks
-    process.removeAllListeners('SIGINT');
+
+    // Clean up all process listeners to prevent memory leaks
+    cleanupProcessListeners();
   });
 
   describe('Global Instance Initialization', () => {
@@ -156,12 +117,12 @@ describe('Server Core Functionality', () => {
       const { initializeGlobalInstances } = await import('./server.js');
 
       // Test initialization with custom paths
-      await initializeGlobalInstances(testCachePath, testEventPath, testRequestQueuesPath);
+      await initializeGlobalInstances(paths.cachePath, paths.eventPath, paths.requestQueuesPath);
 
       // Verify directories were created
-      expect(await fs.access(path.dirname(testCachePath)).then(() => true, () => false)).toBe(true);
-      expect(await fs.access(path.dirname(testEventPath)).then(() => true, () => false)).toBe(true);
-      expect(await fs.access(testRequestQueuesPath).then(() => true, () => false)).toBe(true);
+      expect(await fs.access(paths.storageDir).then(() => true, () => false)).toBe(true);
+      expect(await fs.access(paths.storageDir).then(() => true, () => false)).toBe(true);
+      expect(await fs.access(paths.requestQueuesPath).then(() => true, () => false)).toBe(true);
     });
 
     it('should handle directory creation errors gracefully', async () => {
@@ -202,15 +163,9 @@ describe('Server Core Functionality', () => {
 
     beforeEach(async () => {
       // Create test-specific cache and event store instances
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       server = new McpServer({
         name: "test-server",
@@ -290,16 +245,10 @@ describe('Server Core Functionality', () => {
   describe('HTTP Transport and Express App Creation', () => {
     it('should create Express app with all endpoints', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
@@ -320,16 +269,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle CORS configuration', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
@@ -344,57 +287,51 @@ describe('Server Core Functionality', () => {
 
     it('should handle cache invalidation with API key', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      // Set CACHE_ADMIN_KEY for tests
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
+
       // Test cache invalidation without API key (should fail)
       const response1 = await supertest(app)
         .post('/mcp/cache-invalidate')
         .send({ namespace: 'test', args: {} });
-      
+
       expect(response1.status).toBe(401);
 
       // Test cache invalidation with correct API key
       const response2 = await supertest(app)
         .post('/mcp/cache-invalidate')
-        .set('x-api-key', 'admin-key')
+        .set('x-api-key', 'test-admin-key')
         .send({ namespace: 'test', args: {} });
-      
+
       expect(response2.status).toBe(200);
       expect(response2.body.success).toBe(true);
     });
 
     it('should handle cache clearing', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      // Set CACHE_ADMIN_KEY for tests
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
+
       // Test cache clearing
       const response = await supertest(app)
         .post('/mcp/cache-invalidate')
-        .set('x-api-key', 'admin-key')
+        .set('x-api-key', 'test-admin-key')
         .send({}); // Empty body should clear entire cache
-      
+
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toContain('Entire cache cleared');
@@ -402,16 +339,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle OAuth configuration endpoint', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       // Test without OAuth options
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
@@ -423,16 +354,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle OAuth configuration with options', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       // Test with OAuth options
       const oauthOptions = {
@@ -452,16 +377,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle OAuth token info endpoint without OAuth', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
@@ -488,19 +407,13 @@ describe('Server Core Functionality', () => {
 
       try {
         const { createAppAndHttpTransport } = await import('./server.js');
-        
-        testCache = new PersistentCache({
-          storagePath: testCachePath,
-          persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-          eagerLoading: false
-        });
-        testEventStore = new PersistentEventStore({
-          storagePath: testEventPath,
-          eagerLoading: false
-        });
+
+        const instances = createTestInstances(paths);
+        testCache = instances.cache;
+        testEventStore = instances.eventStore;
 
         await createAppAndHttpTransport(testCache, testEventStore);
-        
+
         // Should have called process.exit(1) due to missing env var
         expect(process.exit).toHaveBeenCalledWith(1);
       } finally {
@@ -519,11 +432,8 @@ describe('Server Core Functionality', () => {
         // Missing getStats method to trigger the error condition
       } as any;
 
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
 
       const { app } = await createAppAndHttpTransport(testCache, mockEventStore);
       
@@ -534,23 +444,21 @@ describe('Server Core Functionality', () => {
 
     it('should handle cache persistence success', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
+
+      // Set CACHE_ADMIN_KEY for tests
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+
       // Instead of testing error case, test the success case since the error handling
       // might be more complex due to global cache usage
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
-      
-      const response = await supertest(app).post('/mcp/cache-persist');
+
+      const response = await supertest(app)
+        .post('/mcp/cache-persist')
+        .set('x-api-key', 'test-admin-key');
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Cache persisted successfully');
@@ -560,16 +468,10 @@ describe('Server Core Functionality', () => {
   describe('Content Type and Request Handling', () => {
     it('should handle JSON-RPC content type middleware', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
@@ -584,16 +486,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle batch request detection', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       
@@ -608,16 +504,10 @@ describe('Server Core Functionality', () => {
 
     it('should handle session request methods', async () => {
       const { createAppAndHttpTransport } = await import('./server.js');
-      
-      testCache = new PersistentCache({
-        storagePath: testCachePath,
-        persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-        eagerLoading: false
-      });
-      testEventStore = new PersistentEventStore({
-        storagePath: testEventPath,
-        eagerLoading: false
-      });
+
+      const instances = createTestInstances(paths);
+      testCache = instances.cache;
+      testEventStore = instances.eventStore;
 
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
       

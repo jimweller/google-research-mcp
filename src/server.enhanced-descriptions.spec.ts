@@ -7,13 +7,11 @@
 
 import { jest, describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Express } from 'express';
-import { PersistentCache, HybridPersistenceStrategy } from './cache/index.js';
+import { PersistentCache } from './cache/index.js';
 import { PersistentEventStore } from './shared/persistentEventStore.js';
 import { createAppAndHttpTransport } from './server.js';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import supertest from 'supertest';
+import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
 // Mock external dependencies
 jest.mock('@google/genai', () => ({
@@ -50,37 +48,23 @@ global.fetch = jest.fn(() => Promise.resolve({
   })
 })) as any;
 
-// Helper to get __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('Enhanced Tool Descriptions - Server Integration', () => {
   let app: Express;
   let testCache: PersistentCache;
   let testEventStore: PersistentEventStore;
-  const testStorageDir = path.resolve(__dirname, '..', 'storage', 'test_temp', `enhanced-descriptions-spec-${Date.now()}`);
-  const testCachePath = path.join(testStorageDir, 'cache');
-  const testEventPath = path.join(testStorageDir, 'events');
+  const paths = createTestStoragePaths('enhanced-descriptions-spec', import.meta.url);
 
   beforeAll(async () => {
     // Setup test environment
-    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'test-api-key';
-    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'test-search-id';
-    process.env.GOOGLE_GEMINI_API_KEY = 'test-gemini-key';
+    setupTestEnv({ CACHE_ADMIN_KEY: 'test-admin-key' });
 
     // Ensure test storage directory exists
-    await fs.mkdir(testStorageDir, { recursive: true });
+    await ensureTestStorageDirs(paths);
 
     // Create test-specific cache and event store instances
-    testCache = new PersistentCache({
-      storagePath: testCachePath,
-      persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-      eagerLoading: false
-    });
-    testEventStore = new PersistentEventStore({
-      storagePath: testEventPath,
-      eagerLoading: false
-    });
+    const instances = createTestInstances(paths);
+    testCache = instances.cache;
+    testEventStore = instances.eventStore;
 
     // Create app instance
     const { app: createdApp } = await createAppAndHttpTransport(testCache, testEventStore);
@@ -89,13 +73,9 @@ describe('Enhanced Tool Descriptions - Server Integration', () => {
 
   afterAll(async () => {
     // Cleanup test resources
-    if (testCache) {
-      await testCache.dispose();
-    }
-    if (testEventStore) {
-      await testEventStore.dispose();
-    }
-    await fs.rm(testStorageDir, { recursive: true, force: true });
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
+    await cleanupTestStorage(paths);
+    cleanupProcessListeners();
   });
 
   describe('Tool Registration and Discovery', () => {
@@ -181,9 +161,10 @@ describe('Enhanced Tool Descriptions - Server Integration', () => {
     });
 
     it('should handle cache management endpoints', async () => {
-      // Test cache persistence endpoint
+      // Test cache persistence endpoint (requires auth)
       const response = await supertest(app)
         .get('/mcp/cache-persist')
+        .set('x-api-key', 'test-admin-key')
         .expect(200);
 
       expect(response.body).toHaveProperty('success', true);

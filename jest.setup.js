@@ -57,7 +57,13 @@ afterAll(async () => {
     jest.clearAllTimers();
     // Ensure we switch back to real timers for any subsequent operations
     jest.useRealTimers();
-    
+
+    // --- Process Listener Cleanup ---
+    // Remove listeners registered by PersistentCache shutdown handlers
+    ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(sig => process.removeAllListeners(sig));
+    process.removeAllListeners('exit');
+    process.removeAllListeners('uncaughtException');
+
   } catch (error) {
     console.warn('Jest afterAll: Cleanup error:', error.message);
   }

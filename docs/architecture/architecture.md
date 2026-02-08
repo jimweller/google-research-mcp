@@ -137,7 +137,7 @@ The server supports two distinct communication protocols to accommodate differen
     5.  Attaches the decoded token payload to the request object for downstream use.
 -   **Scope Enforcement**: A secondary middleware, `requireScopes`, ensures that the validated token contains the specific permissions (scopes) required for the requested tool or management action.
 
-For a complete guide on configuration, see the [**Security Implementation Guide**](../docs/plans/security-improvements-implementation-guide.md).
+For security configuration details, see the OAuth 2.1 section in the [**README**](../../README.md#oauth-21-authorization).
 
 ### MCP Core
 

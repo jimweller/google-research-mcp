@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Security
+- **SDK Upgrade**: Upgraded `@modelcontextprotocol/sdk` from 1.11.0 to ^1.26.0, fixing cross-client data leak (GHSA-345p-7cg4-v4c7)
+- **SSRF Protection**: Added URL validation to block private IPs, metadata endpoints, and non-HTTP protocols in `scrape_page`
+- **Admin Key Hardening**: Removed hardcoded admin key fallback; admin endpoints are disabled when `CACHE_ADMIN_KEY` is unset
+- **Encryption Safety**: Encryption failures now throw `EncryptionError` instead of silently falling back to plaintext
+- **Log Sanitization**: API keys are redacted from log output
+
+### Fixed
+- **YouTube Transcripts**: Upgraded `@danielxceron/youtube-transcript` to ^1.2.6 to fix `playerCaptionsTracklistRenderer` extraction errors
+- **EventEmitter Leak**: Fixed process listener cleanup in `PersistentCache.dispose()` to prevent `MaxListenersExceededWarning`
+- **Jest Worker Exit**: Guarded STDIO transport initialization in test environments to prevent worker hang
+- **Flaky E2E Test**: Stabilized "Full research_topic workflow integration" test by removing dependency on Gemini response keywords
+
+### Changed
+- **Zod Upgrade**: Upgraded Zod to ^3.25.0 for SDK compatibility
+- **Dead Code Removal**: Removed unused npm dependencies (`youtube-transcript-api`, `youtube-transcript-ts`), deleted orphaned files (`inMemoryEventStore.ts`, `e2e_combined_test.mjs`)
+
+### Documentation
+- Fixed duplicate Troubleshooting section in README, replaced with actual troubleshooting content
+- Fixed broken links in architecture docs and testing guide
+- Updated TODO.md to reflect completed P0 security items
+- Replaced placeholder emails in CONTRIBUTING.md and CODE_OF_CONDUCT.md with GitHub security advisory links
+- Removed references to non-existent lint/format scripts in CONTRIBUTING.md
+
 ## [1.2.1] - 2025-07-15
 
 ### Fixed

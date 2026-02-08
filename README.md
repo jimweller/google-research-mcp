@@ -8,7 +8,7 @@
 
 > **Empower AI assistants with robust, persistent, and secure web research capabilities.**
 >
-> This server implements the [Model Context Protocol (MCP)](https://github.com/zoharbabin/google-research-mcp), providing a suite of tools for Google Search, content scraping, and Gemini AI analysis. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
+> This server implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), providing a suite of tools for Google Search, content scraping, and Gemini AI analysis. It's designed for performance and reliability, featuring a persistent caching system, comprehensive timeout handling, and enterprise-grade security.
 >
 > **🎉 Latest Update (v1.2.1):** Fixed critical issue where `scrape_page` and `research_topic` tools were returning placeholder test content instead of actual scraped data. All tools now return real web content as expected.
 
@@ -388,16 +388,10 @@ For more details on the testing philosophy and structure, see the [**Testing Gui
 
 ## Troubleshooting
 
-| Method | Endpoint                 | Description                             | Required Scope               |
-|--------|--------------------------|-----------------------------------------|------------------------------|
-| `GET`  | `/mcp/cache-stats`       | View cache performance statistics.      | `mcp:admin:cache:read`       |
-| `GET`  | `/mcp/event-store-stats` | View event store usage statistics.      | `mcp:admin:event-store:read` |
-| `POST` | `/mcp/cache-invalidate`  | Clear specific cache entries.           | `mcp:admin:cache:invalidate` |
-| `POST` | `/mcp/cache-persist`     | Force the cache to be saved to disk.    | `mcp:admin:cache:persist`    |
-| `GET`  | `/mcp/oauth-scopes`      | Get documentation for all OAuth scopes. | Public                       |
-| `GET`  | `/mcp/oauth-config`      | View the server's OAuth configuration.  | `mcp:admin:config:read`      |
-| `GET`  | `/mcp/oauth-token-info`  | View details of the provided token.     | Requires authentication      |
-
+- **Server won't start**: Ensure all required environment variables (`GOOGLE_CUSTOM_SEARCH_API_KEY`, `GOOGLE_CUSTOM_SEARCH_ID`, `GOOGLE_GEMINI_API_KEY`) are set. The server will exit with a clear error if any are missing.
+- **YouTube transcripts fail**: Some videos have transcripts disabled by their owner. The error message will indicate the specific reason (e.g., `TRANSCRIPT_DISABLED`, `VIDEO_UNAVAILABLE`).
+- **Cache issues**: Use the `/mcp/cache-stats` endpoint to inspect cache health, or `/mcp/cache-persist` to force a disk save. See the [Management API](#management-api) table for all administrative endpoints.
+- **OAuth errors**: Verify your JWKS URI, issuer, and audience settings in the `.env` file. Use `/mcp/oauth-config` to inspect the current configuration.
 
 ## Contributing
 

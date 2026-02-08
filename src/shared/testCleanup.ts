@@ -12,7 +12,7 @@ export async function cleanupStaleLocks(basePath: string = 'storage'): Promise<v
     const lockDirs = await findLockDirectories(basePath);
     for (const lockDir of lockDirs) {
       try {
-        await fs.rmdir(lockDir, { recursive: true });
+        await fs.rm(lockDir, { recursive: true, force: true });
         console.log(`🧹 Cleaned up stale lock directory: ${lockDir}`);
       } catch (error) {
         console.warn(`⚠️ Could not remove lock directory ${lockDir}:`, error.message);
@@ -84,7 +84,7 @@ export async function cleanupTestStorage(testPaths: {
   const basePath = path.dirname(testPaths.cachePath);
   
   try {
-    await fs.rmdir(basePath, { recursive: true });
+    await fs.rm(basePath, { recursive: true, force: true });
     console.log(`🧹 Cleaned up test storage: ${basePath}`);
   } catch (error) {
     console.warn(`⚠️ Could not cleanup test storage ${basePath}:`, error.message);
@@ -98,7 +98,7 @@ export async function cleanupAllTestStorage(): Promise<void> {
   const testTempPath = path.resolve('storage', 'test_temp');
   
   try {
-    await fs.rmdir(testTempPath, { recursive: true });
+    await fs.rm(testTempPath, { recursive: true, force: true });
     console.log(`🧹 Cleaned up all test storage: ${testTempPath}`);
   } catch (error) {
     if (error.code !== 'ENOENT') {

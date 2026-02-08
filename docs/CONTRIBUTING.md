@@ -93,8 +93,7 @@ When you're ready, open a pull request from your fork to the main repository.
 ## Coding and Style Guidelines
 
 - **TypeScript**: We use TypeScript for type safety. Please include types for all new code.
-- **ESLint**: Our project uses ESLint to enforce a consistent code style. Run `npm run lint` to check your code.
-- **Prettier**: We use Prettier for automatic code formatting.
+- **Code Style**: Follow the existing code conventions. The project does not currently use ESLint or Prettier — contributions to add them are welcome.
 - **Error Handling**: All functions should handle potential errors gracefully.
 
 ## Documentation Standards
@@ -104,11 +103,11 @@ When you're ready, open a pull request from your fork to the main repository.
 
 ## Versioning and Changelog
 
-We use [Semantic Versioning](http.semver.org). All changes are recorded in the [**CHANGELOG.md**](./CHANGELOG.md) file. For any user-facing change, please add an entry to the changelog under the "Unreleased" section.
+We use [Semantic Versioning](https://semver.org/). All changes are recorded in the [**CHANGELOG.md**](./CHANGELOG.md) file. For any user-facing change, please add an entry to the changelog under the "Unreleased" section.
 
 ## Reporting Security Vulnerabilities
 
-If you discover a security vulnerability, please do **not** open a public issue. Instead, send a private email to `[PROJECT_SECURITY_EMAIL]`. We will address it as quickly as possible.
+If you discover a security vulnerability, please do **not** open a public issue. Instead, use [GitHub's private vulnerability reporting](https://github.com/zoharbabin/google-research-mcp/security/advisories/new). We will address it as quickly as possible.
 
 ## License
 

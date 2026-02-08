@@ -28,6 +28,22 @@ interface ErrorMessage {
 }
 
 /**
+ * Custom error class for encryption/decryption failures.
+ * Prevents silent fallback to plaintext storage.
+ */
+export class EncryptionError extends Error {
+  public readonly operation: 'encrypt' | 'decrypt';
+  public readonly cause?: unknown;
+
+  constructor(operation: 'encrypt' | 'decrypt', message: string, cause?: unknown) {
+    super(`Encryption ${operation} failed: ${message}`);
+    this.name = 'EncryptionError';
+    this.operation = operation;
+    this.cause = cause;
+  }
+}
+
+/**
  * Handles encryption and decryption of event data
  */
 export class EventStoreEncryption {
@@ -86,7 +102,11 @@ export class EventStoreEncryption {
       return encryptedMessage as unknown as JSONRPCMessage;
     } catch (error) {
       console.error('Failed to encrypt message:', error);
-      return message; // Return original message on error
+      throw new EncryptionError(
+        'encrypt',
+        error instanceof Error ? error.message : String(error),
+        error
+      );
     }
   }
   
@@ -122,7 +142,7 @@ export class EventStoreEncryption {
       // Parse the decrypted JSON string back to a message object
       return JSON.parse(decrypted) as JSONRPCMessage;
     } catch (error) {
-      console.error('Failed to decrypt message:', error);
+      console.error('SECURITY: Failed to decrypt message. Possible key mismatch or data corruption:', error);
       
       // Return a special error message
       const errorMessage: ErrorMessage = {

@@ -17,12 +17,10 @@
 
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { PersistentCache, HybridPersistenceStrategy } from './cache/index.js';
+import { PersistentCache } from './cache/index.js';
 import { PersistentEventStore } from './shared/persistentEventStore.js';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { createTestStoragePaths, ensureTestStorageDirs, cleanupTestStorage, setupTestEnv, createTestInstances, disposeTestInstances, cleanupProcessListeners } from './test-helpers.js';
 
 // Mock external dependencies to focus on tool description testing
 jest.mock('@google/genai', () => ({
@@ -51,37 +49,19 @@ jest.mock('@danielxceron/youtube-transcript', () => ({
 // Mock fetch for Google Search API
 global.fetch = jest.fn() as any;
 
-// Helper to get __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('Enhanced MCP Tool Descriptions', () => {
   let server: McpServer;
   let testCache: PersistentCache;
   let testEventStore: PersistentEventStore;
-  const testStorageDir = path.resolve(__dirname, '..', 'storage', 'test_temp', `tool-descriptions-spec-${Date.now()}`);
-  const testCachePath = path.join(testStorageDir, 'cache');
-  const testEventPath = path.join(testStorageDir, 'events');
+  const paths = createTestStoragePaths('tool-descriptions-spec', import.meta.url);
 
   beforeAll(async () => {
-    // Setup test environment
-    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'test-api-key';
-    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'test-search-id';
-    process.env.GOOGLE_GEMINI_API_KEY = 'test-gemini-key';
+    setupTestEnv();
+    await ensureTestStorageDirs(paths);
 
-    // Ensure test storage directory exists
-    await fs.mkdir(testStorageDir, { recursive: true });
-
-    // Create test-specific cache and event store instances
-    testCache = new PersistentCache({
-      storagePath: testCachePath,
-      persistenceStrategy: new HybridPersistenceStrategy([], 5000, []),
-      eagerLoading: false
-    });
-    testEventStore = new PersistentEventStore({
-      storagePath: testEventPath,
-      eagerLoading: false
-    });
+    const instances = createTestInstances(paths);
+    testCache = instances.cache;
+    testEventStore = instances.eventStore;
 
     // Create server instance
     server = new McpServer({
@@ -91,14 +71,9 @@ describe('Enhanced MCP Tool Descriptions', () => {
   });
 
   afterAll(async () => {
-    // Cleanup test resources
-    if (testCache) {
-      await testCache.dispose();
-    }
-    if (testEventStore) {
-      await testEventStore.dispose();
-    }
-    await fs.rm(testStorageDir, { recursive: true, force: true });
+    await disposeTestInstances({ cache: testCache, eventStore: testEventStore });
+    await cleanupTestStorage(paths);
+    cleanupProcessListeners();
   });
 
   beforeEach(() => {

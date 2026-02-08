@@ -37,6 +37,42 @@ import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation
 import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
 // Import robust YouTube transcript extractor
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
+// Import SSRF protection
+import { validateUrlForSSRF, SSRFProtectionError } from "./shared/urlValidator.js";
+
+// ── Server Configuration Constants ─────────────────────────────
+
+/** Timeout for Google Search API calls */
+const SEARCH_TIMEOUT_MS = 10_000;
+
+/** Timeout for web page scraping and research-topic search phase */
+const SCRAPE_TIMEOUT_MS = 15_000;
+
+/** Timeout for Gemini AI analysis calls */
+const GEMINI_TIMEOUT_MS = 30_000;
+
+/** Timeout for Gemini analysis in the research workflow */
+const RESEARCH_ANALYSIS_TIMEOUT_MS = 45_000;
+
+/** Cache TTL for search results (30 minutes) */
+const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
+
+/** Cache TTL for scraped page content (1 hour) */
+const SCRAPE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/** Cache TTL for Gemini AI analysis results (15 minutes) */
+const GEMINI_CACHE_TTL_MS = 15 * 60 * 1000;
+
+/** Maximum size for scraped page content (50 KB) */
+const MAX_SCRAPE_CONTENT_SIZE = 50 * 1024;
+
+/** Maximum input size for Gemini AI analysis (200 KB) */
+const MAX_GEMINI_INPUT_SIZE = 200 * 1024;
+
+/** Maximum combined content size for research workflow (300 KB) */
+const MAX_RESEARCH_COMBINED_SIZE = 300 * 1024;
+
+// ────────────────────────────────────────────────────────────────
 
 // Type definitions for express
 type Request = express.Request;
@@ -158,6 +194,38 @@ async function initializeGlobalInstances(
 function configureToolsAndResources(
     server: McpServer
 ) {
+    // --- URL and error message sanitization helpers ---
+
+    /**
+     * Sanitizes a URL by redacting sensitive query parameters.
+     * Used to prevent API keys from appearing in logs.
+     *
+     * NOTE: The Google Custom Search JSON API requires the API key as a query
+     * parameter (?key=...). It does NOT support Authorization headers for this
+     * specific API. This function is used ONLY for log output and error messages.
+     */
+    const sanitizeUrl = (url: string): string => {
+        try {
+            const parsed = new URL(url);
+            const sensitiveParams = ['key', 'api_key', 'apiKey', 'apikey', 'token', 'access_token'];
+            for (const param of sensitiveParams) {
+                if (parsed.searchParams.has(param)) {
+                    parsed.searchParams.set(param, '[REDACTED]');
+                }
+            }
+            return parsed.toString();
+        } catch {
+            return url.replace(/([?&])(key|api_key|apiKey|apikey|token|access_token)=[^&]*/gi, '$1$2=[REDACTED]');
+        }
+    };
+
+    /**
+     * Sanitizes error messages that may contain API keys leaked from URLs.
+     */
+    const sanitizeErrorMessage = (msg: string): string => {
+        return msg.replace(/key=[A-Za-z0-9_-]+/gi, 'key=[REDACTED]');
+    };
+
     // 1) Extract each tool's implementation into its own async function with caching
     /**
      * Creates a timeout promise that rejects after the specified duration
@@ -216,17 +284,17 @@ function configureToolsAndResources(
                 
                 // Add timeout protection to search API call
                 const searchPromise = fetch(url, {
-                    signal: AbortSignal.timeout(10000) // 10 second timeout
+                    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
                 });
                 
-                const resp = await withTimeout(searchPromise, 10000, 'Google Search API');
+                const resp = await withTimeout(searchPromise, SEARCH_TIMEOUT_MS, 'Google Search API');
                 if (!resp.ok) throw new Error(`Search API error ${resp.status}`);
                 const data = await resp.json();
                 const links: string[] = (data.items || []).map((i: any) => i.link);
                 return links.map((l) => ({ type: "text" as const, text: l }));
             },
             {
-                ttl: 30 * 60 * 1000, // 30 minutes TTL for search results
+                ttl: SEARCH_CACHE_TTL_MS,
                 staleWhileRevalidate: true, // Enable stale-while-revalidate
                 staleTime: 30 * 60 * 1000 // Allow serving stale content for another 30 minutes while revalidating
             }
@@ -247,6 +315,16 @@ function configureToolsAndResources(
      * @returns The page content as a text content item
      */
     const scrapePageFn = async ({ url }: { url: string }) => {
+        // SSRF protection: validate URL before any network access
+        try {
+            await validateUrlForSSRF(url);
+        } catch (error) {
+            if (error instanceof SSRFProtectionError) {
+                return [{ type: "text" as const, text: `URL blocked: ${error.message}` }];
+            }
+            throw error;
+        }
+
         // Use a longer TTL for scraped content as it changes less frequently
         // Use the globally initialized cache instance directly
         const result = await globalCacheInstance.getOrCompute(
@@ -254,7 +332,7 @@ function configureToolsAndResources(
             { url },
             async () => {
                 if (process.env.NODE_ENV !== 'production') {
-                    console.log(`Cache MISS for scrapePage: ${url}`);
+                    console.log(`Cache MISS for scrapePage: ${sanitizeUrl(url)}`);
                 }
                 let text = "";
                 const yt = url.match(
@@ -304,15 +382,14 @@ function configureToolsAndResources(
                     
                     // Add timeout protection for web scraping
                     const crawlPromise = crawler.run([{ url }]);
-                    await withTimeout(crawlPromise, 15000, 'Web page scraping');
+                    await withTimeout(crawlPromise, SCRAPE_TIMEOUT_MS, 'Web page scraping');
                     text = page;
                 }
 
-                // Limit content size to prevent memory issues (max 50KB per page)
-                const MAX_CONTENT_SIZE = 50 * 1024; // 50KB
-                if (text.length > MAX_CONTENT_SIZE) {
+                // Limit content size to prevent memory issues
+                if (text.length > MAX_SCRAPE_CONTENT_SIZE) {
                     // Truncate intelligently - keep beginning and end
-                    const halfSize = Math.floor(MAX_CONTENT_SIZE / 2);
+                    const halfSize = Math.floor(MAX_SCRAPE_CONTENT_SIZE / 2);
                     text = text.substring(0, halfSize) +
                            "\n\n[... CONTENT TRUNCATED FOR SIZE LIMIT ...]\n\n" +
                            text.substring(text.length - halfSize);
@@ -325,7 +402,7 @@ function configureToolsAndResources(
                 return [{ type: "text" as const, text }];
             },
             {
-                ttl: 60 * 60 * 1000, // 1 hour TTL for scraped content
+                ttl: SCRAPE_CACHE_TTL_MS,
                 staleWhileRevalidate: true, // Enable stale-while-revalidate
                 staleTime: 24 * 60 * 60 * 1000 // Allow serving stale content for up to a day while revalidating
             }
@@ -358,8 +435,7 @@ function configureToolsAndResources(
         text: string;
         model?: string;
     }) => {
-        // Limit text size for Gemini analysis (max 200KB)
-        const MAX_GEMINI_INPUT_SIZE = 200 * 1024; // 200KB
+        // Limit text size for Gemini analysis
         let processedText = text;
         
         if (text.length > MAX_GEMINI_INPUT_SIZE) {
@@ -387,11 +463,11 @@ function configureToolsAndResources(
                     contents: processedText,
                 });
                 
-                const r = await withTimeout(geminiPromise, 30000, 'Gemini AI analysis');
+                const r = await withTimeout(geminiPromise, GEMINI_TIMEOUT_MS, 'Gemini AI analysis');
                 return [{ type: "text" as const, text: r.text }];
             },
             {
-                ttl: 15 * 60 * 1000, // 15 minutes TTL for AI analysis
+                ttl: GEMINI_CACHE_TTL_MS,
                 staleWhileRevalidate: true, // Enable stale-while-revalidate
                 staleTime: 5 * 60 * 1000 // Allow serving stale content for 5 more minutes while revalidating
             }
@@ -507,12 +583,12 @@ function configureToolsAndResources(
                     console.log(`🔍 Starting research for: "${query}" (${num_results} results)`);
                 }
                 const searchPromise = googleSearchFn({ query, num_results });
-                searchResults = await withTimeout(searchPromise, 15000, 'Google Search');
+                searchResults = await withTimeout(searchPromise, SCRAPE_TIMEOUT_MS, 'Google Search');
                 if (process.env.NODE_ENV !== 'production') {
                     console.log(`✅ Search completed: ${searchResults.length} URLs found`);
                 }
             } catch (error) {
-                const errorMsg = `Search failed: ${error.message}`;
+                const errorMsg = `Search failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
                 if (process.env.NODE_ENV !== 'production') {
                     console.error(`❌ ${errorMsg}`);
@@ -547,11 +623,11 @@ function configureToolsAndResources(
                     const scrapePromise = scrapePageFn({ url });
                     const result = await withTimeout(scrapePromise, 20000, `Scraping URL ${index + 1}`);
                     if (process.env.NODE_ENV !== 'production') {
-                        console.log(`✅ Scraped URL ${index + 1}/${urls.length}: ${url.substring(0, 50)}...`);
+                        console.log(`✅ Scraped URL ${index + 1}/${urls.length}: ${sanitizeUrl(url).substring(0, 80)}...`);
                     }
                     return { url, result, success: true };
                 } catch (error) {
-                    const errorMsg = `Failed to scrape ${url}: ${error.message}`;
+                    const errorMsg = `Failed to scrape ${sanitizeUrl(url)}: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                     if (process.env.NODE_ENV !== 'production') {
                         console.warn(`⚠️ ${errorMsg}`);
                     }
@@ -603,12 +679,11 @@ function configureToolsAndResources(
             
             const combined = combinedSections.join("\n\n---\n\n");
             
-            // Limit total combined size before Gemini analysis (max 300KB)
-            const MAX_COMBINED_SIZE = 300 * 1024; // 300KB
+            // Limit total combined size before Gemini analysis
             let finalCombined = combined;
-            if (combined.length > MAX_COMBINED_SIZE) {
+            if (combined.length > MAX_RESEARCH_COMBINED_SIZE) {
                 // Truncate intelligently
-                const halfSize = Math.floor(MAX_COMBINED_SIZE / 2);
+                const halfSize = Math.floor(MAX_RESEARCH_COMBINED_SIZE / 2);
                 finalCombined = combined.substring(0, halfSize) +
                                "\n\n[... CONTENT TRUNCATED FOR PROCESSING LIMITS ...]\n\n" +
                                combined.substring(combined.length - halfSize);
@@ -623,7 +698,7 @@ function configureToolsAndResources(
                     console.log(`🧠 Analyzing combined content (${finalCombined.length} characters)...`);
                 }
                 const analysisPromise = analyzeWithGeminiFn({ text: finalCombined });
-                const analysis = await withTimeout(analysisPromise, 45000, 'Gemini analysis');
+                const analysis = await withTimeout(analysisPromise, RESEARCH_ANALYSIS_TIMEOUT_MS, 'Gemini analysis');
                 
                 const totalTime = Date.now() - startTime;
                 if (process.env.NODE_ENV !== 'production') {
@@ -655,7 +730,7 @@ function configureToolsAndResources(
                 };
                 
             } catch (error) {
-                const errorMsg = `Analysis failed: ${error.message}`;
+                const errorMsg = `Analysis failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
                 if (process.env.NODE_ENV !== 'production') {
                     console.error(`❌ ${errorMsg}`);
@@ -978,9 +1053,17 @@ app.get("/mcp/event-store-stats", async (_req: Request, res: Response) => {
  * In production, use a more robust authentication mechanism.
  */
 app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
-    const apiKey = req.headers["x-api-key"];
-    const expectedKey = process.env.CACHE_ADMIN_KEY || "admin-key"; // Should be set in production
+    const expectedKey = process.env.CACHE_ADMIN_KEY;
 
+    if (!expectedKey) {
+        res.status(503).json({
+            error: "Service Unavailable",
+            message: "Cache admin endpoints are disabled. Set CACHE_ADMIN_KEY environment variable to enable."
+        });
+        return;
+    }
+
+    const apiKey = req.headers["x-api-key"];
     if (apiKey !== expectedKey) {
         res.status(401).json({ error: "Unauthorized" });
         return;
@@ -1017,7 +1100,21 @@ app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
  *
  * Useful for ensuring data is saved before server shutdown.
  */
-app.post("/mcp/cache-persist", async (_req: Request, res: Response) => {
+app.post("/mcp/cache-persist", async (req: Request, res: Response) => {
+ const expectedKey = process.env.CACHE_ADMIN_KEY;
+ if (!expectedKey) {
+   res.status(503).json({
+     error: "Service Unavailable",
+     message: "Cache admin endpoints are disabled. Set CACHE_ADMIN_KEY environment variable to enable."
+   });
+   return;
+ }
+ const apiKey = req.headers["x-api-key"];
+ if (apiKey !== expectedKey) {
+   res.status(401).json({ error: "Unauthorized" });
+   return;
+ }
+
  try {
    // Use the global instance
    await globalCacheInstance.persistToDisk();
@@ -1036,7 +1133,21 @@ app.post("/mcp/cache-persist", async (_req: Request, res: Response) => {
 });
 
 // Add GET endpoint for cache persistence (for easier access via browser or curl)
-app.get("/mcp/cache-persist", async (_req: Request, res: Response) => {
+app.get("/mcp/cache-persist", async (req: Request, res: Response) => {
+ const expectedKey = process.env.CACHE_ADMIN_KEY;
+ if (!expectedKey) {
+   res.status(503).json({
+     error: "Service Unavailable",
+     message: "Cache admin endpoints are disabled. Set CACHE_ADMIN_KEY environment variable to enable."
+   });
+   return;
+ }
+ const apiKey = req.headers["x-api-key"];
+ if (apiKey !== expectedKey) {
+   res.status(401).json({ error: "Unauthorized" });
+   return;
+ }
+
  try {
    // Use the global instance
    await globalCacheInstance.persistToDisk();
@@ -1193,8 +1304,11 @@ export {
   // Initialize global cache and event store first
   await initializeGlobalInstances();
 
-  // Setup STDIO transport (always runs, uses global instances)
-  await setupStdioTransport();
+  // Setup STDIO transport (skip in test environments — the StdioServerTransport
+  // connects to stdin which keeps Jest workers alive indefinitely)
+  if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+    await setupStdioTransport();
+  }
 
   // If MCP_TEST_MODE is 'stdio', DO NOT start HTTP listener.
   if (process.env.MCP_TEST_MODE === 'stdio') {
