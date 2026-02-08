@@ -57,6 +57,13 @@ export interface PersistentCacheOptions {
   encryptedNamespaces?: string[];
   /** Encryption key for sensitive data */
   encryptionKey?: string;
+  /**
+   * Whether to register process signal handlers (SIGINT, SIGTERM, etc.)
+   * for automatic cache persistence on shutdown.
+   * Set to false when the caller manages shutdown itself (e.g., server.ts).
+   * Defaults to true for backward compatibility.
+   */
+  registerShutdownHandlers?: boolean;
 }
 
 /**

@@ -33,6 +33,7 @@ export class PersistentCache extends Cache {
   private namespaceCache: Map<string, Map<string, CacheEntry<any>>> = new Map();
   private isDirty: boolean = false;
   private isInitialized: boolean = false;
+  private initPromise: Promise<void>;
   private eagerLoading: boolean;
   private handlersRegistered: boolean = false;
 
@@ -78,14 +79,16 @@ export class PersistentCache extends Cache {
     // Initialize eager loading flag
     this.eagerLoading = options.eagerLoading || false;
 
-    // Initialize the cache - we need to handle this asynchronously
-    // but can't use async/await in constructor
-    this.initialize().catch(error => {
+    // Initialize the cache asynchronously. Store the promise so callers
+    // can await it instead of polling with setInterval.
+    this.initPromise = this.initialize().catch(error => {
       console.error('Error during cache initialization:', error);
     });
 
-    // Register shutdown handler
-    this.registerShutdownHandlers();
+    // Register shutdown handlers unless caller manages shutdown itself
+    if (options.registerShutdownHandlers !== false) {
+      this.registerShutdownHandlers();
+    }
   }
 
   /**
@@ -174,60 +177,69 @@ export class PersistentCache extends Cache {
    *
    * @private
    */
-  // Store bound handler functions so we can remove them later
+  // Store bound handler functions so we can remove them later.
+  // The 'exit' handler must stay synchronous — no async I/O is possible once
+  // the event loop is draining. Signal handlers use an async-first approach:
+  // attempt async persistToDisk() with a grace period, falling back to
+  // persistSync() only if the async path times out or fails.
+
   private exitHandler = () => this.persistSync();
-  private sigintHandler = () => {
-    try {
-      console.log('Persisting cache before exit...');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
-    this.persistSync();
-    if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
-      process.exit(0);
-    }
-  };
-  private sigtermHandler = () => {
-    try {
-      console.log('Persisting cache before exit...');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
-    this.persistSync();
-    if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
-      process.exit(0);
-    }
-  };
-  private sighupHandler = () => {
-    try {
-      console.log('SIGHUP received. Persisting cache before exit...');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
-    this.persistSync();
-    if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
-      process.exit(0);
-    }
-  };
-  private uncaughtExceptionHandler = (error: Error) => {
-    // Check if it's an EPIPE error
-    if ((error as NodeJS.ErrnoException).code === 'EPIPE') {
-      // For EPIPE errors, just stop the persistence timer and exit gracefully
-      this.stopPersistenceTimer();
-      // Don't try to log anything as that would cause another EPIPE error
+
+  private attemptAsyncPersistThenExit(exitCode: number): void {
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+      // In tests, just persist synchronously without exiting
+      this.persistSync();
       return;
     }
 
+    const GRACE_MS = 5000;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      process.exit(exitCode);
+    };
+
+    // Race: async persist vs grace-period timeout
+    this.persistToDisk()
+      .catch(() => {
+        // Async failed — fall back to sync
+        this.persistSync();
+      })
+      .finally(finish);
+
+    // If async takes too long, fall back to sync + exit
+    setTimeout(() => {
+      if (!settled) {
+        this.persistSync();
+        finish();
+      }
+    }, GRACE_MS).unref();
+  }
+
+  private sigintHandler = () => {
+    try { console.log('Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    this.attemptAsyncPersistThenExit(0);
+  };
+  private sigtermHandler = () => {
+    try { console.log('Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    this.attemptAsyncPersistThenExit(0);
+  };
+  private sighupHandler = () => {
+    try { console.log('SIGHUP received. Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    this.attemptAsyncPersistThenExit(0);
+  };
+  private uncaughtExceptionHandler = (error: Error) => {
+    if ((error as NodeJS.ErrnoException).code === 'EPIPE') {
+      this.stopPersistenceTimer();
+      return;
+    }
     try {
       console.error('Uncaught exception:', error);
       console.log('Persisting cache before exit...');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
-    this.persistSync();
-    if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
-      process.exit(1);
-    }
+    } catch (_) { /* ignore */ }
+    this.attemptAsyncPersistThenExit(1);
   };
 
   private registerShutdownHandlers(): void {
@@ -509,32 +521,9 @@ export class PersistentCache extends Cache {
       staleTime?: number;
     } = {}
   ): Promise<T> {
-    // Wait for initialization to complete
+    // Wait for initialization to complete (all callers share one promise)
     if (!this.isInitialized) {
-      await new Promise<void>(resolve => {
-        // Use a timeout to prevent infinite waiting
-        const timeout = setTimeout(() => {
-          console.warn('Cache initialization timeout - proceeding anyway');
-          resolve();
-        }, 10000); // 10 second timeout
-        
-        // Store the interval ID so it can be cleared
-        const checkInterval = setInterval(() => {
-          if (this.isInitialized) {
-            clearInterval(checkInterval);
-            clearTimeout(timeout);
-            resolve();
-          }
-        }, 100);
-        
-        // Ensure timers don't prevent Node from exiting
-        if (checkInterval.unref) {
-          checkInterval.unref();
-        }
-        if (timeout.unref) {
-          timeout.unref();
-        }
-      });
+      await this.initPromise;
     }
 
     // Generate the hashed key and full key

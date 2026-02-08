@@ -35,6 +35,7 @@ import { createOAuthMiddleware, OAuthMiddlewareOptions } from "./shared/oauthMid
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 import { validateUrlForSSRF, SSRFProtectionError, getSSRFOptionsFromEnv } from "./shared/urlValidator.js";
 import { logger } from "./shared/logger.js";
+import { CircuitBreaker, CircuitOpenError } from "./shared/circuitBreaker.js";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 // ── Server Configuration Constants ─────────────────────────────
@@ -164,7 +165,8 @@ async function initializeGlobalInstances(
       ['googleSearch', 'scrapePage'] // All persistent namespaces
     ),
     storagePath: cachePath,
-    eagerLoading: true // Load all entries on startup
+    eagerLoading: true, // Load all entries on startup
+    registerShutdownHandlers: false // server.ts manages shutdown via gracefulShutdown()
   });
 
   // Build event store options, wiring encryption if configured
@@ -272,17 +274,19 @@ function configureToolsAndResources(
         ]);
     };
 
-    /**
-     * Performs a Google search with caching and timeout protection
-     *
-     * Uses the Google Custom Search API to find relevant web pages.
-     * Results are cached for 30 minutes with stale-while-revalidate pattern
-     * for improved performance and reduced API calls.
-     *
-     * @param query - The search query string
-     * @param num_results - Number of results to return (default: 5)
-     * @returns Array of search result URLs as text content items
-     */
+    // ── Circuit breakers for external API calls ──────────────────
+    const googleSearchCircuit = new CircuitBreaker({
+        failureThreshold: 5,
+        resetTimeout: 60_000,
+        onStateChange: (from, to) => logger.warn('Google Search circuit breaker state change', { from, to }),
+    });
+
+    const webScrapingCircuit = new CircuitBreaker({
+        failureThreshold: 5,
+        resetTimeout: 30_000,
+        onStateChange: (from, to) => logger.warn('Web scraping circuit breaker state change', { from, to }),
+    });
+
     /** Map user-friendly time range names to Google dateRestrict values */
     const TIME_RANGE_MAP: Record<string, string> = {
         day: 'd1',
@@ -295,10 +299,12 @@ function configureToolsAndResources(
         query,
         num_results,
         time_range,
+        traceId,
     }: {
         query: string;
         num_results: number;
         time_range?: string;
+        traceId?: string;
     }) => {
         const trimmedQuery = query.trim();
         // Use the globally initialized cache instance directly
@@ -306,7 +312,7 @@ function configureToolsAndResources(
             'googleSearch',
             { query: trimmedQuery, num_results, time_range },
             async () => {
-                logger.debug(`Cache MISS for googleSearch`, { query: trimmedQuery, num_results, time_range });
+                logger.debug(`Cache MISS for googleSearch`, { traceId, query: trimmedQuery, num_results, time_range });
                 const key = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!;
                 const cx = process.env.GOOGLE_CUSTOM_SEARCH_ID!;
                 let url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(
@@ -318,13 +324,16 @@ function configureToolsAndResources(
                     url += `&dateRestrict=${TIME_RANGE_MAP[time_range]}`;
                 }
 
-                // Add timeout protection to search API call
-                const searchPromise = fetch(url, {
-                    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
+                // Circuit breaker + timeout protection for the search API call
+                const resp = await googleSearchCircuit.execute(async () => {
+                    const r = await withTimeout(
+                        fetch(url, { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }),
+                        SEARCH_TIMEOUT_MS,
+                        'Google Search API'
+                    );
+                    if (!r.ok) throw new Error(`Search API error ${r.status}`);
+                    return r;
                 });
-
-                const resp = await withTimeout(searchPromise, SEARCH_TIMEOUT_MS, 'Google Search API');
-                if (!resp.ok) throw new Error(`Search API error ${resp.status}`);
                 const data = await resp.json();
                 const links: string[] = (data.items || []).map((i: any) => i.link);
                 return links.map((l) => ({ type: "text" as const, text: l }));
@@ -428,7 +437,7 @@ function configureToolsAndResources(
         return pageContent;
     }
 
-    const scrapePageFn = async ({ url }: { url: string }) => {
+    const scrapePageFn = async ({ url, traceId }: { url: string; traceId?: string }) => {
         // SSRF protection: validate URL before any network access
         try {
             await validateUrlForSSRF(url, SSRF_OPTIONS);
@@ -445,7 +454,7 @@ function configureToolsAndResources(
             'scrapePage',
             { url },
             async () => {
-                logger.debug('Cache MISS for scrapePage', { url: sanitizeUrl(url) });
+                logger.debug('Cache MISS for scrapePage', { traceId, url: sanitizeUrl(url) });
                 let text = "";
                 const yt = url.match(
                     /(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})(?:[&#?]|$)/
@@ -457,10 +466,10 @@ function configureToolsAndResources(
 
                     if (result.success) {
                         text = result.transcript!;
-                        logger.info(`YouTube transcript extracted for video ${yt[1]}`, { attempts: result.attempts, duration: result.duration });
+                        logger.info(`YouTube transcript extracted for video ${yt[1]}`, { traceId, attempts: result.attempts, duration: result.duration });
                     } else {
                         // Throw specific error instead of returning empty text
-                        logger.warn(`YouTube transcript extraction failed for video ${yt[1]}`, { error: result.error!.message });
+                        logger.warn(`YouTube transcript extraction failed for video ${yt[1]}`, { traceId, error: result.error!.message });
                         throw new YouTubeTranscriptError(
                             result.error!.type,
                             result.error!.message,
@@ -469,15 +478,18 @@ function configureToolsAndResources(
                         );
                     }
                 } else {
-                    // Tiered scraping: try fast static HTML first, fall back to JS rendering
-                    text = await scrapeWithCheerio(url);
+                    // Circuit breaker + tiered scraping: fast static HTML first, JS rendering fallback
+                    text = await webScrapingCircuit.execute(async () => {
+                        let content = await scrapeWithCheerio(url);
 
-                    if (text.length < MIN_CHEERIO_CONTENT_LENGTH) {
-                        logger.info('Cheerio returned insufficient content, falling back to Playwright', {
-                            url: sanitizeUrl(url), cheerioLength: text.length
-                        });
-                        text = await scrapeWithPlaywright(url);
-                    }
+                        if (content.length < MIN_CHEERIO_CONTENT_LENGTH) {
+                            logger.info('Cheerio returned insufficient content, falling back to Playwright', {
+                                traceId, url: sanitizeUrl(url), cheerioLength: content.length
+                            });
+                            content = await scrapeWithPlaywright(url);
+                        }
+                        return content;
+                    });
                 }
 
                 // Limit content size to prevent memory issues
@@ -514,7 +526,12 @@ function configureToolsAndResources(
             readOnlyHint: true,
             openWorldHint: true
         },
-        async ({ query, num_results = 5, time_range }) => ({ content: await googleSearchFn({ query, num_results, time_range }) })
+        async ({ query, num_results = 5, time_range }) => {
+            const traceId = randomUUID();
+            logger.info('google_search invoked', { traceId, query, num_results, time_range });
+            const content = await googleSearchFn({ query, num_results, time_range, traceId });
+            return { content };
+        }
     );
 
     server.tool(
@@ -528,7 +545,9 @@ function configureToolsAndResources(
             openWorldHint: true
         },
         async ({ url }) => {
-            const result = await scrapePageFn({ url });
+            const traceId = randomUUID();
+            logger.info('scrape_page invoked', { traceId, url });
+            const result = await scrapePageFn({ url, traceId });
             return { content: result };
         }
     );
@@ -547,20 +566,21 @@ function configureToolsAndResources(
             openWorldHint: true
         },
         async ({ query, num_results, include_sources }) => {
+            const traceId = randomUUID();
             const trimmedQuery = query.trim();
             const startTime = Date.now();
             const errors: string[] = [];
             let searchResults: any[] = [];
 
             try {
-                logger.info('search_and_scrape: searching', { query: trimmedQuery, num_results });
-                const searchPromise = googleSearchFn({ query: trimmedQuery, num_results });
+                logger.info('search_and_scrape: searching', { traceId, query: trimmedQuery, num_results });
+                const searchPromise = googleSearchFn({ query: trimmedQuery, num_results, traceId });
                 searchResults = await withTimeout(searchPromise, SCRAPE_TIMEOUT_MS, 'Google Search');
-                logger.info('search_and_scrape: search completed', { urlsFound: searchResults.length });
+                logger.info('search_and_scrape: search completed', { traceId, urlsFound: searchResults.length });
             } catch (error) {
                 const errorMsg = `Search failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
-                logger.warn(errorMsg);
+                logger.warn(errorMsg, { traceId });
                 return {
                     content: [{
                         type: "text" as const,
@@ -580,15 +600,15 @@ function configureToolsAndResources(
             }
 
             // Scrape each URL in parallel with graceful degradation
-            logger.info('search_and_scrape: scraping', { count: urls.length });
+            logger.info('search_and_scrape: scraping', { traceId, count: urls.length });
             const scrapePromises = urls.map(async (url, index) => {
                 try {
-                    const result = await withTimeout(scrapePageFn({ url }), 20000, `Scraping URL ${index + 1}`);
-                    logger.debug(`Scraped URL ${index + 1}/${urls.length}`, { url: sanitizeUrl(url).substring(0, 80) });
+                    const result = await withTimeout(scrapePageFn({ url, traceId }), 20000, `Scraping URL ${index + 1}`);
+                    logger.debug(`Scraped URL ${index + 1}/${urls.length}`, { traceId, url: sanitizeUrl(url).substring(0, 80) });
                     return { url, result, success: true };
                 } catch (error) {
                     const errorMsg = `Failed to scrape ${sanitizeUrl(url)}: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
-                    logger.warn(errorMsg);
+                    logger.warn(errorMsg, { traceId });
                     return { url, error: errorMsg, success: false };
                 }
             });
@@ -609,11 +629,11 @@ function configureToolsAndResources(
                 } else {
                     const errorMsg = `Scrape promise rejected for URL ${index + 1}: ${result.reason}`;
                     errors.push(errorMsg);
-                    logger.warn(errorMsg);
+                    logger.warn(errorMsg, { traceId });
                 }
             });
 
-            logger.info('search_and_scrape: scraping done', { successful: successfulScrapes.length, total: urls.length });
+            logger.info('search_and_scrape: scraping done', { traceId, successful: successfulScrapes.length, total: urls.length });
 
             if (successfulScrapes.length === 0) {
                 const errorSummary = errors.length > 0 ? `\n\nErrors encountered:\n${errors.join('\n')}` : '';
@@ -636,7 +656,7 @@ function configureToolsAndResources(
                 finalCombined = finalCombined.substring(0, halfSize) +
                                "\n\n[... CONTENT TRUNCATED FOR SIZE LIMITS ...]\n\n" +
                                finalCombined.substring(finalCombined.length - halfSize);
-                logger.info('Combined content truncated', { from: combinedSections.join('').length, to: finalCombined.length });
+                logger.info('Combined content truncated', { traceId, from: combinedSections.join('').length, to: finalCombined.length });
             }
 
             const sourcesList = include_sources

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Circuit Breaker**: External API calls (Google Search, web scraping) are now protected by a circuit breaker that prevents cascading failures. When an external service is down, the circuit opens after 5 consecutive failures and automatically recovers after a cooldown period. Stale cached data is served transparently while the circuit is open. (#71)
+- **Request Tracing**: Every tool invocation generates a unique `traceId` (UUID) that flows through the entire request pipeline — search, scrape, and composite `search_and_scrape` operations. All log entries include the trace ID for end-to-end debugging. (#39)
 - **JavaScript Rendering**: `scrape_page` now renders JavaScript-heavy pages (React, Next.js, SPAs) via a Playwright fallback when static HTML extraction returns insufficient content. Static pages still use the fast CheerioCrawler path.
 
 ### Security
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log Sanitization**: API keys are redacted from log output
 
 ### Fixed
+- **Cache Init Race Condition**: `PersistentCache.getOrCompute()` now awaits a shared init promise instead of spawning per-call `setInterval` polling timers. Concurrent calls during startup no longer risk timeouts or resource leaks. (#54)
+- **Synchronous Shutdown I/O**: Signal handlers (SIGINT, SIGTERM, SIGHUP) now attempt async `persistToDisk()` with a 5-second grace period before falling back to synchronous writes. Added `registerShutdownHandlers` option so `server.ts` can manage shutdown exclusively via its own `gracefulShutdown()`, eliminating double signal handling. (#53)
 - **YouTube Transcripts**: Upgraded `@danielxceron/youtube-transcript` to ^1.2.6 to fix `playerCaptionsTracklistRenderer` extraction errors
 - **EventEmitter Leak**: Fixed process listener cleanup in `PersistentCache.dispose()` to prevent `MaxListenersExceededWarning`
 - **Jest Worker Exit**: Guarded STDIO transport initialization in test environments to prevent worker hang

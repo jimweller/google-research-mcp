@@ -166,6 +166,58 @@ describe('PersistentCache', () => {
     });
   });
 
-  // The initialization tests were removed because they were causing timeout issues
-  // The functionality is already covered by other tests
+  describe('concurrent initialization (#54)', () => {
+    it('should handle concurrent getOrCompute calls during initialization without hanging', async () => {
+      // Create a new cache (initialization starts in constructor).
+      // Before the fix, concurrent calls would each spawn a setInterval poller;
+      // after the fix they all await the same initPromise.
+      const cache = new PersistentCache({
+        defaultTTL: 5000,
+        maxSize: 10,
+        persistenceManager,
+        eagerLoading: false,
+        registerShutdownHandlers: false
+      });
+
+      // Fire multiple concurrent calls with different keys — all should resolve
+      // promptly without timing out or spawning multiple polling intervals.
+      const results = await Promise.all([
+        cache.getOrCompute('ns', { id: 1 }, async () => 'a'),
+        cache.getOrCompute('ns', { id: 2 }, async () => 'b'),
+        cache.getOrCompute('ns', { id: 3 }, async () => 'c'),
+      ]);
+
+      expect(results).toEqual(['a', 'b', 'c']);
+      await cache.dispose();
+    });
+  });
+
+  describe('registerShutdownHandlers option (#53)', () => {
+    it('should register handlers by default', async () => {
+      const listenersBefore = process.listenerCount('SIGINT');
+      const cache = new PersistentCache({
+        defaultTTL: 1000,
+        maxSize: 5,
+        persistenceManager,
+        eagerLoading: false
+      });
+      const listenersAfter = process.listenerCount('SIGINT');
+      expect(listenersAfter).toBeGreaterThan(listenersBefore);
+      await cache.dispose();
+    });
+
+    it('should not register handlers when registerShutdownHandlers is false', async () => {
+      const listenersBefore = process.listenerCount('SIGINT');
+      const cache = new PersistentCache({
+        defaultTTL: 1000,
+        maxSize: 5,
+        persistenceManager,
+        eagerLoading: false,
+        registerShutdownHandlers: false
+      });
+      const listenersAfter = process.listenerCount('SIGINT');
+      expect(listenersAfter).toBe(listenersBefore);
+      await cache.dispose();
+    });
+  });
 });
