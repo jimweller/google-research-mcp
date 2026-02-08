@@ -377,14 +377,17 @@ function configureToolsAndResources(
                     let page = "";
                     const crawler = new CheerioCrawler({
                         requestHandler: async ({ $ }) => {
-                            // Extract more content by including HTML structure
-                            // This ensures we get more than 50 characters for the test
+                            // Guard against non-HTML responses (e.g. JSON APIs) where
+                            // Cheerio can't parse the body and $ is undefined.
+                            if (typeof $ !== 'function') {
+                                page = "[Non-HTML response — content could not be extracted]";
+                                return;
+                            }
                             const title = $("title").text() || "";
                             const headings = $("h1, h2, h3").map((_, el) => $(el).text()).get().join(" ");
                             const paragraphs = $("p").map((_, el) => $(el).text()).get().join(" ");
                             const bodyText = $("body").text().replace(/\s+/g, " ").trim();
 
-                            // Combine all content to ensure we have enough text
                             page = `Title: ${title}\nHeadings: ${headings}\nParagraphs: ${paragraphs}\nBody: ${bodyText}`;
                         },
                         // Validate redirect targets against SSRF rules
@@ -409,9 +412,10 @@ function configureToolsAndResources(
                         // scrapes and don't need cross-request session tracking.
                         useSessionPool: false,
                         persistCookiesPerSession: false,
-                        // Add timeout configuration to crawler
-                        requestHandlerTimeoutSecs: 15, // 15 second timeout
-                        maxRequestsPerCrawl: 1, // Only process the single URL
+                        // Timeout and retry configuration for single-page scrapes
+                        requestHandlerTimeoutSecs: 15,
+                        maxRequestsPerCrawl: 1,
+                        maxRequestRetries: 0, // No retries — we have our own timeout wrapper
                     });
                     
                     // Add timeout protection for web scraping
