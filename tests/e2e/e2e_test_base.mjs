@@ -49,7 +49,7 @@ export class MCPEndToEndTest {
     const { tools } = await this.client.listTools();
     assert.deepStrictEqual(
       tools.map((t) => t.name).sort(),
-      ["google_search", "scrape_page", "analyze_with_gemini", "research_topic"].sort()
+      ["google_search", "scrape_page", "analyze_with_gemini", "research_topic", "extract_structured_data"].sort()
     );
     console.log("✨ tools/list OK");
   }

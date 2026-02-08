@@ -4,6 +4,7 @@ import * as fsPromises from 'node:fs/promises'; // Use promises for async operat
 import * as fs from 'node:fs'; // Use standard fs for sync operations
 import * as path from 'node:path';
 import { EventData } from './types/eventStore.js';
+import { logger } from './logger.js';
 
 /**
  * Options for the EventPersistenceManager
@@ -58,7 +59,7 @@ export class EventPersistenceManager {
     try {
       fs.mkdirSync(this.storagePath, { recursive: true });
     } catch (error) {
-       console.error(`Error creating event store directory ${this.storagePath}:`, error);
+       logger.error(`Error creating event store directory ${this.storagePath}`, { error: String(error) });
        // Decide if we should throw or allow continuation
        // For now, log the error and continue, assuming persistence might fail later
     }
@@ -146,16 +147,16 @@ export class EventPersistenceManager {
               const eventData = await this.readEventFile(eventPath);
               events.set(eventId, eventData);
             } catch (error) {
-              console.error(`Failed to load event ${eventId}:`, error);
+              logger.error(`Failed to load event ${eventId}`, { error: String(error) });
             }
           }
         } catch (error) {
-          console.error(`Failed to read stream directory ${streamId}:`, error);
+          logger.error(`Failed to read stream directory ${streamId}`, { error: String(error) });
         }
       }
     } catch (error) {
       // Storage directory doesn't exist or can't be read
-      console.error(`Failed to load events from disk:`, error);
+      logger.error('Failed to load events from disk', { error: String(error) });
     }
     
     return events;
@@ -212,7 +213,7 @@ export class EventPersistenceManager {
     
     this.persistenceTimer = setInterval(() => {
       this.onPersistenceInterval().catch(error => {
-        console.error('Error in persistence interval handler:', error);
+        logger.error('Error in persistence interval handler', { error: String(error) });
       });
     }, this.persistenceInterval);
     
@@ -244,27 +245,19 @@ export class EventPersistenceManager {
     if (this.isDisposed) {
       return;
     }
-    
-    try {
-      console.log('Disposing EventPersistenceManager...');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
-    
+
+    logger.debug('Disposing EventPersistenceManager...');
+
     // Stop the persistence timer
     this.stopPeriodicPersistence();
-    
+
     // Clear callback references
     this.onPersistCallback = undefined;
-    
+
     // Mark as disposed
     this.isDisposed = true;
-    
-    try {
-      console.log('EventPersistenceManager disposed.');
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
+
+    logger.debug('EventPersistenceManager disposed.');
   }
   
   /**
@@ -281,7 +274,7 @@ export class EventPersistenceManager {
       // Persist them to disk
       await this.persistEvents(events);
     } catch (error) {
-      console.error('Error during periodic persistence:', error);
+      logger.error('Error during periodic persistence', { error: String(error) });
     }
   }
   
@@ -363,7 +356,7 @@ export class EventPersistenceManager {
     try {
       return JSON.parse(data) as EventData;
     } catch (parseError) {
-      console.error(`Error parsing JSON for event file ${filePath}:`, parseError);
+      logger.error(`Error parsing JSON for event file ${filePath}`, { error: String(parseError) });
       // If JSON parsing fails, the file might be corrupted
       // Remove the corrupted file and throw an error
       try {

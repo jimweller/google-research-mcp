@@ -39,6 +39,10 @@ import { createOAuthMiddleware, requireScopes, OAuthMiddlewareOptions } from "./
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 // Import SSRF protection
 import { validateUrlForSSRF, SSRFProtectionError, getSSRFOptionsFromEnv } from "./shared/urlValidator.js";
+// Import structured logger
+import { logger } from "./shared/logger.js";
+// Import rate limiter for HTTP transport
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -139,11 +143,9 @@ async function initializeGlobalInstances(
     await fs.mkdir(path.dirname(cachePath), { recursive: true });
     await fs.mkdir(path.dirname(eventPath), { recursive: true });
     await fs.mkdir(crawleeStoragePath, { recursive: true });
-    if (process.env.NODE_ENV !== 'test') {
-      console.log(`✅ Ensured storage directories exist.`);
-    }
+    logger.info('Ensured storage directories exist.');
   } catch (error) {
-    console.error(`❌ Error ensuring storage directories: ${error}`);
+    logger.error('Error ensuring storage directories', { error: String(error) });
     process.exit(1); // Exit if we can't create storage dirs
   }
 
@@ -168,14 +170,31 @@ async function initializeGlobalInstances(
     eagerLoading: true // Load all entries on startup
   });
 
-  eventStoreInstance = new PersistentEventStore({
+  // Build event store options, wiring encryption if configured
+  const eventStoreOpts: import("./shared/types/eventStore.js").PersistentEventStoreOptions = {
     storagePath: eventPath,
     maxEventsPerStream: 1000,
     eventTTL: 24 * 60 * 60 * 1000, // 24 hours
     persistenceInterval: 5 * 60 * 1000, // 5 minutes
     criticalStreamIds: [], // Define critical streams if needed
-    eagerLoading: true
-  });
+    eagerLoading: true,
+  };
+
+  const encryptionKey = process.env.EVENT_STORE_ENCRYPTION_KEY;
+  if (encryptionKey) {
+    if (!/^[0-9a-fA-F]{64}$/.test(encryptionKey)) {
+      logger.error('EVENT_STORE_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Exiting.');
+      process.exit(1);
+    }
+    const keyBuffer = Buffer.from(encryptionKey, 'hex');
+    eventStoreOpts.encryption = {
+      enabled: true,
+      keyProvider: async () => keyBuffer,
+    };
+    logger.info('Event store encryption enabled.');
+  }
+
+  eventStoreInstance = new PersistentEventStore(eventStoreOpts);
 
   // Initialize robust YouTube transcript extractor
   transcriptExtractorInstance = new RobustYouTubeTranscriptExtractor();
@@ -183,9 +202,7 @@ async function initializeGlobalInstances(
   // Load data eagerly
   await globalCacheInstance.loadFromDisk(); // Cache needs explicit load
   // Event store loads eagerly via constructor option, no explicit call needed here
-  if (process.env.NODE_ENV !== 'test') {
-    console.log("✅ Global Cache, Event Store, and YouTube Transcript Extractor initialized.");
-  }
+  logger.info('Global Cache, Event Store, and YouTube Transcript Extractor initialized.');
 }
 
 // --- Tool/Resource Configuration (Moved to Top Level) ---
@@ -273,32 +290,46 @@ function configureToolsAndResources(
      * @param num_results - Number of results to return (default: 5)
      * @returns Array of search result URLs as text content items
      */
+    /** Map user-friendly time range names to Google dateRestrict values */
+    const TIME_RANGE_MAP: Record<string, string> = {
+        day: 'd1',
+        week: 'w1',
+        month: 'm1',
+        year: 'y1',
+    };
+
     const googleSearchFn = async ({
         query,
         num_results,
+        time_range,
     }: {
         query: string;
         num_results: number;
+        time_range?: string;
     }) => {
+        const trimmedQuery = query.trim();
         // Use the globally initialized cache instance directly
         return globalCacheInstance.getOrCompute(
             'googleSearch',
-            { query, num_results },
+            { query: trimmedQuery, num_results, time_range },
             async () => {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`Cache MISS for googleSearch: ${query}, ${num_results}`);
-                }
+                logger.debug(`Cache MISS for googleSearch`, { query: trimmedQuery, num_results, time_range });
                 const key = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!;
                 const cx = process.env.GOOGLE_CUSTOM_SEARCH_ID!;
-                const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(
-                    query
+                let url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(
+                    trimmedQuery
                 )}&num=${num_results}`;
-                
+
+                // Append dateRestrict for recency filtering
+                if (time_range && TIME_RANGE_MAP[time_range]) {
+                    url += `&dateRestrict=${TIME_RANGE_MAP[time_range]}`;
+                }
+
                 // Add timeout protection to search API call
                 const searchPromise = fetch(url, {
                     signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
                 });
-                
+
                 const resp = await withTimeout(searchPromise, SEARCH_TIMEOUT_MS, 'Google Search API');
                 if (!resp.ok) throw new Error(`Search API error ${resp.status}`);
                 const data = await resp.json();
@@ -343,28 +374,22 @@ function configureToolsAndResources(
             'scrapePage',
             { url },
             async () => {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`Cache MISS for scrapePage: ${sanitizeUrl(url)}`);
-                }
+                logger.debug('Cache MISS for scrapePage', { url: sanitizeUrl(url) });
                 let text = "";
                 const yt = url.match(
                     /(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})(?:[&#?]|$)/
                 );
-                
+
                 if (yt) {
                     // Use robust transcript extractor instead of direct call
                     const result = await transcriptExtractorInstance.extractTranscript(yt[1]);
-                    
+
                     if (result.success) {
                         text = result.transcript!;
-                        if (process.env.NODE_ENV !== 'production') {
-                            console.log(`✅ YouTube transcript extracted successfully for video ${yt[1]} (${result.attempts} attempts, ${result.duration}ms)`);
-                        }
+                        logger.info(`YouTube transcript extracted for video ${yt[1]}`, { attempts: result.attempts, duration: result.duration });
                     } else {
                         // Throw specific error instead of returning empty text
-                        if (process.env.NODE_ENV !== 'production') {
-                            console.error(`❌ YouTube transcript extraction failed for video ${yt[1]}: ${result.error!.message}`);
-                        }
+                        logger.warn(`YouTube transcript extraction failed for video ${yt[1]}`, { error: result.error!.message });
                         throw new YouTubeTranscriptError(
                             result.error!.type,
                             result.error!.message,
@@ -482,7 +507,7 @@ function configureToolsAndResources(
             processedText = text.substring(0, halfSize) +
                            "\n\n[... CONTENT TRUNCATED FOR API LIMITS - ANALYZE AVAILABLE CONTENT ...]\n\n" +
                            text.substring(text.length - halfSize);
-            console.log(`⚠️ Gemini input truncated from ${text.length} to ${processedText.length} characters`);
+            logger.info('Gemini input truncated', { from: text.length, to: processedText.length });
         }
 
         // Use a shorter TTL for AI analysis as the model may be updated
@@ -491,9 +516,7 @@ function configureToolsAndResources(
             'analyzeWithGemini',
             { text: processedText, model },
             async () => {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`Cache MISS for analyzeWithGemini: ${processedText.substring(0, 50)}...`);
-                }
+                logger.debug('Cache MISS for analyzeWithGemini', { preview: processedText.substring(0, 50) });
                 
                 // Add timeout protection for Gemini API calls
                 const geminiPromise = gemini.models.generateContent({
@@ -536,21 +559,22 @@ function configureToolsAndResources(
     server.tool(
         "google_search",
         {
-            query: z.string().describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
-            num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage.")
+            query: z.string().min(1).max(500).describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
+            num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage."),
+            time_range: z.enum(['day', 'week', 'month', 'year']).optional().describe("Restrict results to a recent time range. 'day' = last 24 hours, 'week' = last 7 days, 'month' = last 30 days, 'year' = last 365 days. Omit for no time restriction.")
         },
         {
             title: "Google Search",
             readOnlyHint: true,
             openWorldHint: true
         },
-        async ({ query, num_results = 5 }) => ({ content: await googleSearchFn({ query, num_results }) })
+        async ({ query, num_results = 5, time_range }) => ({ content: await googleSearchFn({ query, num_results, time_range }) })
     );
 
     server.tool(
         "scrape_page",
         {
-            url: z.string().url().describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
+            url: z.string().url().max(2048).describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
         },
         {
             title: "Scrape Page",
@@ -571,8 +595,8 @@ function configureToolsAndResources(
     server.tool(
         "analyze_with_gemini",
         {
-            text: z.string().describe("The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results."),
-            model: z.string().default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. Available options: 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support). Use gemini-2.0-flash-001 for speed, gemini-pro for detailed analysis."),
+            text: z.string().min(1).max(500000).describe("The text content to analyze. Can be articles, documents, scraped content, or any text requiring AI analysis. Large texts are automatically truncated intelligently. Provide clear analysis instructions within the text for best results."),
+            model: z.enum(["gemini-2.0-flash-001", "gemini-pro", "gemini-pro-vision"]).default("gemini-2.0-flash-001").describe("The Gemini model to use for analysis. 'gemini-2.0-flash-001' (fastest, recommended), 'gemini-pro' (detailed analysis), 'gemini-pro-vision' (future multimodal support)."),
         },
         {
             title: "Gemini Analysis",
@@ -599,44 +623,52 @@ function configureToolsAndResources(
      * - Comprehensive error reporting and success metrics
      * - Individual operation timeouts for reliability
      */
+    /** Depth presets: controls how many sources to scrape and whether to run Gemini analysis */
+    const DEPTH_PRESETS: Record<string, { maxSources: number; skipAnalysis: boolean; promptDetail: string }> = {
+        quick:    { maxSources: 2, skipAnalysis: true,  promptDetail: 'brief' },
+        standard: { maxSources: 3, skipAnalysis: false, promptDetail: 'standard' },
+        deep:     { maxSources: 5, skipAnalysis: false, promptDetail: 'detailed and thorough' },
+    };
+
     server.tool(
         "research_topic",
         {
-            query: z.string().describe("The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results. Frame as a research question or specific topic for comprehensive analysis. Examples: 'artificial intelligence trends 2024', 'sustainable energy solutions for small businesses', 'TypeScript performance optimization techniques'."),
-            num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze. More sources provide broader coverage but take longer to process. Recommended range: 2-5 sources for optimal balance of speed and coverage. Use 2-3 for quick research, 4-5 for comprehensive analysis.")
+            query: z.string().min(1).max(500).describe("The research topic or question to investigate comprehensively. Use descriptive, specific queries for best results."),
+            num_results: z.number().min(1).max(5).default(3).describe("Number of sources to research and analyze (1-5). More sources provide broader coverage."),
+            include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs to the output for verification."),
+            depth: z.enum(['quick', 'standard', 'deep']).default('standard').describe("Research depth. 'quick' = 2 sources, no AI analysis. 'standard' = 3 sources + Gemini analysis. 'deep' = 5 sources + detailed Gemini analysis."),
+            focus: z.string().max(200).optional().describe("Optional focus instruction to guide the AI analysis, e.g. 'focus on cost comparisons' or 'emphasize security implications'.")
         },
         {
             title: "Research Topic",
             readOnlyHint: true,
             openWorldHint: true
         },
-        async ({ query, num_results }) => {
+        async ({ query, num_results, include_sources, depth, focus }) => {
+            const trimmedQuery = query.trim();
+            const preset = DEPTH_PRESETS[depth] ?? DEPTH_PRESETS.standard;
+            // Effective source count: min of user request, depth preset, and hard max
+            const effectiveSources = Math.min(num_results, preset.maxSources);
             const startTime = Date.now();
             const errors: string[] = [];
             let searchResults: any[] = [];
-            
+
             try {
                 // A) Search with timeout protection
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`🔍 Starting research for: "${query}" (${num_results} results)`);
-                }
-                const searchPromise = googleSearchFn({ query, num_results });
+                logger.info('Starting research', { query: trimmedQuery, effectiveSources, depth });
+                const searchPromise = googleSearchFn({ query: trimmedQuery, num_results: effectiveSources });
                 searchResults = await withTimeout(searchPromise, SCRAPE_TIMEOUT_MS, 'Google Search');
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`✅ Search completed: ${searchResults.length} URLs found`);
-                }
+                logger.info('Search completed', { urlsFound: searchResults.length });
             } catch (error) {
                 const errorMsg = `Search failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.error(`❌ ${errorMsg}`);
-                }
-                
+                logger.warn(errorMsg);
+
                 // Return early if search fails completely
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research failed: Unable to search for "${query}". Error: ${errorMsg}`
+                        text: `Research failed: Unable to search for "${trimmedQuery}". Error: ${errorMsg}`
                     }]
                 };
             }
@@ -646,57 +678,49 @@ function configureToolsAndResources(
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research completed but no URLs found for query "${query}".`
+                        text: `Research completed but no URLs found for query "${trimmedQuery}".`
                     }]
                 };
             }
 
             // B) Scrape each URL with graceful degradation using Promise.allSettled
-            if (process.env.NODE_ENV !== 'production') {
-                console.log(`📄 Scraping ${urls.length} URLs...`);
-            }
+            logger.info('Scraping URLs', { count: urls.length });
             const scrapePromises = urls.map(async (url, index) => {
                 try {
-                    // Add per-URL timeout
                     const scrapePromise = scrapePageFn({ url });
                     const result = await withTimeout(scrapePromise, 20000, `Scraping URL ${index + 1}`);
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log(`✅ Scraped URL ${index + 1}/${urls.length}: ${sanitizeUrl(url).substring(0, 80)}...`);
-                    }
+                    logger.debug(`Scraped URL ${index + 1}/${urls.length}`, { url: sanitizeUrl(url).substring(0, 80) });
                     return { url, result, success: true };
                 } catch (error) {
                     const errorMsg = `Failed to scrape ${sanitizeUrl(url)}: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.warn(`⚠️ ${errorMsg}`);
-                    }
+                    logger.warn(errorMsg);
                     return { url, error: errorMsg, success: false };
                 }
             });
 
             // Use Promise.allSettled to handle partial failures gracefully
             const scrapeResults = await Promise.allSettled(scrapePromises);
-            
-            // Process results and collect successful scrapes
-            const successfulScrapes: any[] = [];
+
+            // Process results and collect successful scrapes (with URL for attribution)
+            const successfulScrapes: { url: string; content: string }[] = [];
             scrapeResults.forEach((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
-                        successfulScrapes.push(result.value.result);
+                        successfulScrapes.push({
+                            url: result.value.url,
+                            content: result.value.result[0].text,
+                        });
                     } else {
                         errors.push(result.value.error);
                     }
                 } else {
                     const errorMsg = `Scrape promise rejected for URL ${index + 1}: ${result.reason}`;
                     errors.push(errorMsg);
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.error(`❌ ${errorMsg}`);
-                    }
+                    logger.warn(errorMsg);
                 }
             });
 
-            if (process.env.NODE_ENV !== 'production') {
-                console.log(`📊 Scraping summary: ${successfulScrapes.length}/${urls.length} successful`);
-            }
+            logger.info('Scraping summary', { successful: successfulScrapes.length, total: urls.length });
 
             // C) Check if we have enough content to analyze
             if (successfulScrapes.length === 0) {
@@ -704,88 +728,107 @@ function configureToolsAndResources(
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Research failed: Unable to scrape any content from the ${urls.length} URLs found for "${query}".${errorSummary}`
+                        text: `Research failed: Unable to scrape any content from the ${urls.length} URLs found for "${trimmedQuery}".${errorSummary}`
                     }]
                 };
             }
 
-            // D) Combine successful scrapes with size management
+            // D) Combine successful scrapes with size management and source attribution
             const combinedSections = successfulScrapes.map((scrape, index) => {
-                const content = scrape[0].text;
-                return `=== Source ${index + 1} ===\n${content}`;
+                return `=== Source ${index + 1}: ${scrape.url} ===\n${scrape.content}`;
             });
-            
+
             const combined = combinedSections.join("\n\n---\n\n");
-            
+
             // Limit total combined size before Gemini analysis
             let finalCombined = combined;
             if (combined.length > MAX_RESEARCH_COMBINED_SIZE) {
-                // Truncate intelligently
                 const halfSize = Math.floor(MAX_RESEARCH_COMBINED_SIZE / 2);
                 finalCombined = combined.substring(0, halfSize) +
                                "\n\n[... CONTENT TRUNCATED FOR PROCESSING LIMITS ...]\n\n" +
                                combined.substring(combined.length - halfSize);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`⚠️ Combined content truncated from ${combined.length} to ${finalCombined.length} characters`);
-                }
+                logger.info('Combined content truncated', { from: combined.length, to: finalCombined.length });
             }
 
-            // E) Analyze with Gemini (with timeout protection built into analyzeWithGeminiFn)
-            try {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`🧠 Analyzing combined content (${finalCombined.length} characters)...`);
-                }
-                const analysisPromise = analyzeWithGeminiFn({ text: finalCombined });
-                const analysis = await withTimeout(analysisPromise, RESEARCH_ANALYSIS_TIMEOUT_MS, 'Gemini analysis');
-                
+            // Build the sources list for attribution
+            const sourcesList = include_sources
+                ? '\n\n--- Sources ---\n' + successfulScrapes.map((s, i) => `${i + 1}. ${s.url}`).join('\n')
+                : '';
+
+            // E) For 'quick' depth, skip Gemini analysis and return raw content
+            if (preset.skipAnalysis) {
                 const totalTime = Date.now() - startTime;
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`✅ Research completed in ${totalTime}ms`);
+                logger.info('Research completed (quick mode)', { totalTime });
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: finalCombined + sourcesList + `\n\n--- Research Summary ---\nQuery: "${trimmedQuery}"\nDepth: ${depth}\nURLs scraped: ${successfulScrapes.length}/${urls.length}\nProcessing time: ${totalTime}ms`
+                    }]
+                };
+            }
+
+            // F) Analyze with Gemini
+            try {
+                logger.info('Analyzing combined content', { size: finalCombined.length, depth });
+
+                // Build analysis prompt with optional focus instruction
+                let analysisPrompt = finalCombined;
+                if (focus) {
+                    analysisPrompt = `[ANALYSIS FOCUS: ${focus}]\n\n${analysisPrompt}`;
                 }
-                
+                if (depth === 'deep') {
+                    analysisPrompt = `[Provide a ${preset.promptDetail} analysis covering key findings, patterns, contradictions, and implications.]\n\n${analysisPrompt}`;
+                }
+
+                const analysisPromiseGemini = analyzeWithGeminiFn({ text: analysisPrompt });
+                const analysis = await withTimeout(analysisPromiseGemini, RESEARCH_ANALYSIS_TIMEOUT_MS, 'Gemini analysis');
+
+                const totalTime = Date.now() - startTime;
+                logger.info('Research completed', { totalTime, depth });
+
                 // Append summary information to analysis
                 const summaryInfo = [
                     `\n\n--- Research Summary ---`,
-                    `Query: "${query}"`,
+                    `Query: "${trimmedQuery}"`,
+                    `Depth: ${depth}`,
                     `URLs found: ${urls.length}`,
                     `URLs successfully scraped: ${successfulScrapes.length}`,
                     `Content size analyzed: ${finalCombined.length} characters`,
                     `Total processing time: ${totalTime}ms`
                 ];
-                
+
                 if (errors.length > 0) {
                     summaryInfo.push(`Errors encountered: ${errors.length}`);
                     summaryInfo.push(`Error details: ${errors.join('; ')}`);
                 }
-                
-                const analysisText = analysis[0].text + summaryInfo.join('\n');
-                
+
+                const analysisText = analysis[0].text + sourcesList + summaryInfo.join('\n');
+
                 return {
                     content: [{
                         type: "text" as const,
                         text: analysisText
                     }]
                 };
-                
+
             } catch (error) {
                 const errorMsg = `Analysis failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.error(`❌ ${errorMsg}`);
-                }
-                
+                logger.warn(errorMsg);
+
                 // Return raw combined content if analysis fails
                 const fallbackContent = [
-                    `Research partially completed for "${query}" but analysis failed.`,
+                    `Research partially completed for "${trimmedQuery}" but analysis failed.`,
                     ``,
                     `Successfully scraped ${successfulScrapes.length}/${urls.length} URLs:`,
                     ``,
                     finalCombined,
+                    sourcesList,
                     ``,
                     `--- Issues Encountered ---`,
                     errors.join('\n')
                 ].join('\n');
-                
+
                 return {
                     content: [{
                         type: "text" as const,
@@ -793,6 +836,57 @@ function configureToolsAndResources(
                     }]
                 };
             }
+        }
+    );
+
+    // 4) Structured data extraction tool
+    /**
+     * Extract Structured Data Tool
+     *
+     * Uses Gemini AI to extract specific information from text based on a
+     * user-provided schema description. Useful for pulling entities, facts,
+     * or structured records out of unstructured text.
+     */
+    server.tool(
+        "extract_structured_data",
+        {
+            text: z.string().min(1).max(500000).describe("The text to extract structured data from."),
+            schema_description: z.string().min(1).max(2000).describe("A natural-language description of the data schema to extract. Example: 'Extract a list of companies mentioned, with their name, industry, and any revenue figures.'"),
+            model: z.enum(["gemini-2.0-flash-001", "gemini-pro", "gemini-pro-vision"]).default("gemini-2.0-flash-001").describe("The Gemini model to use for extraction.")
+        },
+        {
+            title: "Extract Structured Data",
+            readOnlyHint: true,
+            openWorldHint: false
+        },
+        async ({ text, schema_description, model }) => {
+            const extractionPrompt = [
+                `You are a data extraction assistant. Extract structured data from the text below according to the requested schema.`,
+                ``,
+                `REQUESTED SCHEMA:`,
+                schema_description,
+                ``,
+                `Return the extracted data as valid JSON. If a field cannot be determined, use null.`,
+                `If no matching data is found, return an empty array or object as appropriate.`,
+                ``,
+                `TEXT:`,
+                text,
+            ].join('\n');
+
+            return globalCacheInstance.getOrCompute(
+                'extractStructuredData',
+                { text: text.substring(0, 200), schema_description, model },
+                async () => {
+                    logger.debug('Extracting structured data', { schemaPreview: schema_description.substring(0, 80), model });
+                    const result = await analyzeWithGeminiFn({ text: extractionPrompt, model });
+                    return result;
+                },
+                {
+                    ttl: GEMINI_CACHE_TTL_MS,
+                    staleWhileRevalidate: true,
+                    staleTime: 5 * 60 * 1000
+                }
+            ).then(result => ({ content: result }));
         }
     );
 
@@ -810,7 +904,7 @@ function configureToolsAndResources(
 async function setupStdioTransport() {
   // Ensure global instances are initialized first
   if (!globalCacheInstance || !eventStoreInstance) {
-    console.error("❌ Cannot setup stdio transport: Global instances not initialized.");
+    logger.error('Cannot setup stdio transport: Global instances not initialized.');
     process.exit(1);
   }
 
@@ -822,9 +916,7 @@ async function setupStdioTransport() {
   configureToolsAndResources(stdioServerInstance); // This function needs access to globalCacheInstance
   stdioTransportInstance = new StdioServerTransport();
   await stdioServerInstance.connect(stdioTransportInstance);
-  if (process.env.NODE_ENV !== 'test') {
-    console.log("✅ stdio transport ready");
-  }
+  logger.info('stdio transport ready');
 }
 
 /**
@@ -843,7 +935,7 @@ export async function createAppAndHttpTransport(
 ) {
   // Ensure we have the necessary instances (either global or passed parameters)
   if ((!globalCacheInstance || !eventStoreInstance) && (!cache || !eventStore)) {
-    console.error("❌ Cannot create app: Neither global instances nor parameters are available.");
+    logger.error('Cannot create app: Neither global instances nor parameters are available.');
     process.exit(1);
   }
 
@@ -862,7 +954,7 @@ for (const key of [
     "GOOGLE_GEMINI_API_KEY"
 ]) {
     if (!process.env[key]) {
-        console.error(`❌ Missing required env var ${key}`);
+        logger.error(`Missing required env var ${key}`);
         process.exit(1);
     }
 }
@@ -881,11 +973,31 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
       })
   );
 
+  // ── Rate limiting ──────────────────────────────────────────────
+  const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+  const rateLimitMax = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100;
+
+  app.use(rateLimit({
+    windowMs: rateLimitWindowMs,
+    max: rateLimitMax,
+    keyGenerator: (req: Request) => (req as any).oauth?.sub ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req: Request, res: Response) => {
+      res.status(429).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Rate limit exceeded. Try again later." },
+        id: null,
+      });
+    },
+  }));
+  logger.info('Rate limiting configured', { windowMs: rateLimitWindowMs, max: rateLimitMax });
+
   // Configure OAuth middleware if options are provided
   let oauthMiddleware: ReturnType<typeof createOAuthMiddleware> | undefined;
   if (oauthOptions) { // Use passed-in options
     oauthMiddleware = createOAuthMiddleware(oauthOptions);
-    console.log("✅ OAuth 2.1 middleware configured");
+    logger.info('OAuth 2.1 middleware configured');
   }
 
   /**
@@ -914,7 +1026,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
     sessionIdGenerator: () => randomUUID(),
     eventStore: eventStoreInstance, // Use the passed-in instance
     onsessioninitialized: (sid) => {
-      console.log(`✅ SSE session initialized: ${sid}`);
+      logger.info('SSE session initialized', { sessionId: sid });
     },
     // Removed onclose handler - rely on transport's internal management
   });
@@ -922,9 +1034,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
 
   // Connect the MCP server to the transport
   await httpServer.connect(httpTransportInstance);
-  if (process.env.NODE_ENV !== 'test') {
-    console.log("✅ HTTP transport connected to MCP server");
-  }
+  logger.info('HTTP transport connected to MCP server');
 
   // Middleware to handle content negotiation for JSON-RPC requests
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -1280,34 +1390,30 @@ app.get("/mcp/oauth-token-info",
  * with SIGINT (Ctrl+C). This prevents data loss during shutdown.
  */
 process.on('SIGINT', async () => {
-    // Refined SIGINT handler for non-test environments
-    console.log('Closing transports and persisting data before exit...');
+    logger.info('Closing transports and persisting data before exit...');
     try {
-        // Close transports first
         if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
           await stdioTransportInstance.close();
-          console.log('STDIO transport closed.');
+          logger.info('STDIO transport closed.');
         }
         if (httpTransportInstance && typeof httpTransportInstance.close === 'function') {
           await httpTransportInstance.close();
-          console.log('HTTP transport closed.');
+          logger.info('HTTP transport closed.');
         }
 
-        // Dispose cache (includes persistence) using the global instance
         if (globalCacheInstance && typeof globalCacheInstance.dispose === 'function') {
           await globalCacheInstance.dispose();
         } else {
-          console.warn('globalCacheInstance dispose method not found or cache not available.');
+          logger.warn('globalCacheInstance dispose method not found or cache not available.');
         }
 
-        // Dispose the global event store (includes persistence) using the global instance
         if (eventStoreInstance && typeof eventStoreInstance.dispose === 'function') {
             await eventStoreInstance.dispose();
         } else {
-          console.warn('eventStoreInstance dispose method not found or event store not available.');
+          logger.warn('eventStoreInstance dispose method not found or event store not available.');
         }
     } catch (error) {
-        console.error('Error during graceful shutdown:', error);
+        logger.error('Error during graceful shutdown', { error: String(error) });
     }
     process.exit(0);
 });
@@ -1352,11 +1458,7 @@ export {
 
   // If MCP_TEST_MODE is 'stdio', DO NOT start HTTP listener.
   if (process.env.MCP_TEST_MODE === 'stdio') {
-    // Log info message only outside of Jest test environment
-    if (process.env.NODE_ENV !== 'test') {
-      console.log("ℹ️ Running in stdio test mode, HTTP listener skipped.");
-      console.log("   STDIO transport is active. Waiting for input...");
-    }
+    logger.info('Running in stdio test mode, HTTP listener skipped. STDIO transport is active.');
   } else if (import.meta.url === `file://${process.argv[1]}`) {
     // Otherwise, if run directly, start the HTTP listener.
     const PORT = Number(process.env.PORT || 3000);
@@ -1371,17 +1473,14 @@ export {
 
     // Start the HTTP server
     app.listen(PORT, "::", () => {
-        console.log(`🌐 SSE server listening on`);
-        console.log(`   • http://[::1]:${PORT}/mcp   (IPv6 loopback)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp   (IPv4 loopback)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-stats   (Cache statistics)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/event-store-stats   (Event store statistics)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/cache-persist   (Force cache persistence)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-scopes   (OAuth scopes documentation)`);
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-config   (OAuth configuration)`);
-        // Always show the OAuth token info endpoint in the logs
-        // The endpoint itself will handle the case when OAuth is not configured
-        console.log(`   • http://127.0.0.1:${PORT}/mcp/oauth-token-info   (OAuth token info - requires authentication)`);
+        logger.info(`SSE server listening on port ${PORT}`, {
+          endpoints: [
+            `http://[::1]:${PORT}/mcp`,
+            `http://127.0.0.1:${PORT}/mcp/cache-stats`,
+            `http://127.0.0.1:${PORT}/mcp/event-store-stats`,
+            `http://127.0.0.1:${PORT}/mcp/oauth-config`,
+          ]
+        });
       });
   }
 })(); // End main execution block

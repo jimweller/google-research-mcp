@@ -4,6 +4,7 @@ import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { EventPersistenceManager } from "./eventPersistenceManager.js";
 import { EventStoreEncryption, sanitizeMessage } from "./eventStoreEncryption.js";
+import { logger } from "./logger.js";
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { 
@@ -115,7 +116,7 @@ export class PersistentEventStore implements EventStore {
       this.memoryStore = events;
       // console.log(`Loaded ${events.size} events from disk`); // Removed for test hygiene
     } catch (error) {
-      console.error('Failed to load events from disk:', error);
+      logger.error('Failed to load events from disk', { error: String(error) });
     }
   }
   
@@ -355,7 +356,7 @@ export class PersistentEventStore implements EventStore {
         return true;
       }
     } catch (error) {
-      console.error(`Failed to load event ${eventId} from disk:`, error);
+      logger.error(`Failed to load event ${eventId} from disk`, { error: String(error) });
     }
     return false;
   }
@@ -452,7 +453,7 @@ export class PersistentEventStore implements EventStore {
     }
     
     if (expiredEvents.length > 0) {
-      console.log(`Cleaned up ${expiredEvents.length} expired events`);
+      logger.info(`Cleaned up ${expiredEvents.length} expired events`);
     }
   }
   
@@ -501,75 +502,41 @@ export class PersistentEventStore implements EventStore {
    * This should be called during graceful shutdown.
    */
   async dispose(): Promise<void> {
-    try {
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('Disposing PersistentEventStore...');
-      }
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
+    logger.info('Disposing PersistentEventStore...');
 
     // Stop cleanup timer first
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
-      try {
-        if (process.env.NODE_ENV !== 'test') {
-          console.log('Event cleanup timer stopped.');
-        }
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      logger.debug('Event cleanup timer stopped.');
     }
-    
+
     // Attempt to persist all remaining events to disk
     try {
       await this.persistToDisk();
-      try {
-        if (process.env.NODE_ENV !== 'test') {
-          console.log('Final event persistence successful during disposal.');
-        }
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      logger.debug('Final event persistence successful during disposal.');
     } catch (error) {
-      try {
-        console.error('Error persisting events during disposal:', error);
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
-      // Decide if this error should prevent shutdown or just be logged
+      logger.error('Error persisting events during disposal', { error: String(error) });
     }
-    
+
     try {
-      // Properly dispose the persistence manager
       await this.persistenceManager.dispose();
     } catch (error) {
-      try {
-        console.error('Error disposing persistence manager:', error);
-      } catch (_) {
-        // Ignore console errors during shutdown
-      }
+      logger.error('Error disposing persistence manager', { error: String(error) });
     }
-    
+
     // Clear memory store to help with garbage collection
     this.memoryStore.clear();
-    
+
     // Log final audit event regardless of persistence success/failure
     await this.logAuditEvent({
       timestamp: new Date().toISOString(),
       operation: 'dispose',
       streamId: 'system',
-      result: 'success' // Log success of disposal action itself
+      result: 'success'
     });
 
-    try {
-      if (process.env.NODE_ENV !== 'test') {
-        console.log('PersistentEventStore disposed.');
-      }
-    } catch (_) {
-      // Ignore console errors during shutdown
-    }
+    logger.info('PersistentEventStore disposed.');
   }
   
   /**
@@ -598,7 +565,7 @@ export class PersistentEventStore implements EventStore {
         await fs.unlink(eventPath);
         deletedCount++;
       } catch (error) {
-        console.error(`Failed to delete event ${eventId} for user ${userId}:`, error);
+        logger.error(`Failed to delete event ${eventId} for user ${userId}`, { error: String(error) });
       }
     }
     
@@ -625,7 +592,7 @@ export class PersistentEventStore implements EventStore {
       try {
         await this.auditLog.logger(event);
       } catch (error) {
-        console.error('Failed to log audit event:', error);
+        logger.error('Failed to log audit event', { error: String(error) });
       }
     }
   }

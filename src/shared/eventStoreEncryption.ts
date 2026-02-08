@@ -3,6 +3,7 @@
 import * as crypto from 'node:crypto';
 import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { EncryptionOptions } from './types/eventStore.js';
+import { logger } from './logger.js';
 
 // Define a more specific type for our encrypted messages
 interface EncryptedMessage {
@@ -101,7 +102,7 @@ export class EventStoreEncryption {
       
       return encryptedMessage as unknown as JSONRPCMessage;
     } catch (error) {
-      console.error('Failed to encrypt message:', error);
+      logger.error('Failed to encrypt message', { error: String(error) });
       throw new EncryptionError(
         'encrypt',
         error instanceof Error ? error.message : String(error),
@@ -142,7 +143,7 @@ export class EventStoreEncryption {
       // Parse the decrypted JSON string back to a message object
       return JSON.parse(decrypted) as JSONRPCMessage;
     } catch (error) {
-      console.error('SECURITY: Failed to decrypt message. Possible key mismatch or data corruption:', error);
+      logger.error('SECURITY: Failed to decrypt message. Possible key mismatch or data corruption', { error: String(error) });
       
       // Return a special error message
       const errorMessage: ErrorMessage = {
