@@ -1,13 +1,11 @@
 # Google Researcher MCP Server
 
-[![Tests](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/test.yml)
+[![CI/CD](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/CONTRIBUTING.md)
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives AI assistants the ability to search Google, scrape web pages (including JavaScript-rendered sites), and extract YouTube transcripts. Built for performance, reliability, and security.
-
-<img width="499" alt="Screenshot of the Google Researcher MCP Server running in a terminal, showing tool registration and transport readiness" src="https://github.com/user-attachments/assets/e369b537-3043-4f80-b7f2-410512ebc1b4" />
 
 ## Quick Start
 
@@ -91,47 +89,31 @@ npm run dev            # Server is now running on STDIO transport
 
 ```mermaid
 graph TD
-    subgraph "Client"
-        A[MCP Client]
-    end
+    A[MCP Client] -->|local process| B[STDIO Transport]
+    A -->|network| C[HTTP+SSE Transport]
 
-    subgraph "Transport Layer"
-        B[STDIO]
-        C[HTTP-SSE]
-    end
+    C --> L[OAuth 2.1 + Rate Limiter]
+    L --> D
+    C -.->|session replay| K[Event Store]
+    B --> D[McpServer<br>MCP SDK routing + dispatch]
 
-    subgraph "Core Logic"
-        D{MCP Request Router}
-        E[Tool Executor]
-    end
+    D --> F[google_search]
+    D --> G[scrape_page]
+    D --> I[search_and_scrape]
+    I -.->|delegates| F
+    I -.->|delegates| G
 
-    subgraph "Tools"
-        F[google_search]
-        G[scrape_page]
-        I[search_and_scrape]
-    end
+    G --> N[SSRF Validator]
+    N --> S1[CheerioCrawler<br>static HTML]
+    S1 -.->|insufficient content| S2[Playwright<br>JS rendering]
+    G --> YT[YouTube Transcript<br>Extractor]
 
-    subgraph "Support Systems"
-        J[Persistent Cache]
-        K[Event Store]
-        L[OAuth Middleware]
-    end
-
-    A -- Connects via --> B
-    A -- Connects via --> C
-    B -- Forwards to --> D
-    C -- Forwards to --> D
-    D -- Routes to --> E
-    E -- Invokes --> F
-    E -- Invokes --> G
-    E -- Invokes --> I
-    F & G & I -- Uses --> J
-    D -- Uses --> K
-    C -- Protected by --> L
+    F & G --> J[Persistent Cache<br>memory + disk]
 
     style J fill:#f9f,stroke:#333,stroke-width:2px
     style K fill:#ccf,stroke:#333,stroke-width:2px
     style L fill:#f99,stroke:#333,stroke-width:2px
+    style N fill:#ff9,stroke:#333,stroke-width:2px
 ```
 
 For a detailed explanation, see the [Architecture Guide](./docs/architecture/architecture.md).
