@@ -1304,9 +1304,11 @@ export {
   // Initialize global cache and event store first
   await initializeGlobalInstances();
 
-  // Setup STDIO transport (skip in test environments — the StdioServerTransport
-  // connects to stdin which keeps Jest workers alive indefinitely)
-  if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+  // Setup STDIO transport (skip inside Jest workers — the StdioServerTransport
+  // connects to stdin which keeps Jest workers alive indefinitely).
+  // Note: E2E tests spawn the server as a child process and DO need stdio transport,
+  // so we only check JEST_WORKER_ID (set exclusively by Jest), not NODE_ENV.
+  if (!process.env.JEST_WORKER_ID) {
     await setupStdioTransport();
   }
 
