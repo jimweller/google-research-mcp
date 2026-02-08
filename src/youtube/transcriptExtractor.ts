@@ -6,7 +6,12 @@
  * in the original implementation.
  */
 
-import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
+// The youtube-transcript package lacks "type": "module" in its package.json,
+// so Node < 24 loads the ESM entry as CJS and fails. Use createRequire to
+// load the CJS build directly, which works on all Node versions.
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { YoutubeTranscript } = require("@danielxceron/youtube-transcript");
 
 // Interface for transcript fetcher to allow dependency injection
 export interface TranscriptFetcher {
