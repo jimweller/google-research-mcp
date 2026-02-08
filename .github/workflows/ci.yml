@@ -148,16 +148,16 @@ jobs:
       run: npm ci
 
     - name: Run security audit
-      continue-on-error: true
       run: |
         echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
-        if npm audit --audit-level=critical 2>&1; then
-          echo "✅ No critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+        if npm audit --audit-level=high 2>&1; then
+          echo "✅ No high/critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
         else
           echo "⚠️ Vulnerabilities found — review output above" >> $GITHUB_STEP_SUMMARY
           echo ""
           echo "Run \`npm audit fix\` locally to resolve fixable issues."
-          npm audit --audit-level=moderate || true
+          npm audit || true
+          exit 1
         fi
 
   performance:
