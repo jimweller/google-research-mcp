@@ -131,6 +131,7 @@ export const sourceSchema = z.object({
   success: z.boolean().describe('Whether scraping succeeded'),
   contentLength: z.number().int().optional().describe('Length of content if successful'),
   citation: citationSchema.optional().describe('Citation information if available'),
+  qualityScore: z.number().min(0).max(1).optional().describe('Overall quality score (0-1)'),
 });
 
 /**
@@ -159,6 +160,7 @@ export type SourceOutput = {
   success: boolean;
   contentLength?: number;
   citation?: CitationOutput;
+  qualityScore?: number;
 };
 
 /** Inferred type for search_and_scrape structured output */
@@ -173,4 +175,117 @@ export type SearchAndScrapeOutput = {
     duplicatesRemoved?: number;
     reductionPercent?: number;
   };
+};
+
+// ── Quality Scores Schema ─────────────────────────────────────────────────────
+
+/**
+ * Schema for quality score breakdown
+ */
+export const qualityScoresSchema = z.object({
+  /** Composite quality score (0-1) */
+  overall: z.number().min(0).max(1).describe('Composite quality score'),
+  /** Query relevance score (0-1) */
+  relevance: z.number().min(0).max(1).describe('Query relevance score'),
+  /** Content freshness score (0-1) */
+  freshness: z.number().min(0).max(1).describe('Content recency score'),
+  /** Domain authority score (0-1) */
+  authority: z.number().min(0).max(1).describe('Domain authority score'),
+  /** Content quality score (0-1) */
+  contentQuality: z.number().min(0).max(1).describe('Content quality score'),
+});
+
+/** Inferred type for quality scores */
+export type QualityScoresOutput = z.infer<typeof qualityScoresSchema>;
+
+// ── Google Image Search Output ────────────────────────────────────────────────
+
+/**
+ * Schema for image search result
+ */
+export const imageResultSchema = z.object({
+  /** Image title */
+  title: z.string().describe('Title or description of the image'),
+  /** Direct URL to the full image */
+  link: z.string().url().describe('Direct URL to the full image'),
+  /** URL to thumbnail version */
+  thumbnailLink: z.string().url().optional().describe('URL to thumbnail version'),
+  /** Domain hosting the image */
+  displayLink: z.string().describe('Domain hosting the image'),
+  /** URL of the page containing the image */
+  contextLink: z.string().url().optional().describe('URL of the page containing the image'),
+  /** Image width in pixels */
+  width: z.number().int().optional().describe('Image width in pixels'),
+  /** Image height in pixels */
+  height: z.number().int().optional().describe('Image height in pixels'),
+  /** File size (as string from API) */
+  fileSize: z.string().optional().describe('File size'),
+});
+
+/**
+ * Structured output schema for google_image_search tool
+ */
+export const googleImageSearchOutputSchema = {
+  /** Array of image results */
+  images: z.array(imageResultSchema).describe('List of image results'),
+  /** The original search query */
+  query: z.string().describe('The search query that was executed'),
+  /** Number of images found */
+  resultCount: z.number().int().min(0).describe('Number of images found'),
+};
+
+/** Inferred type for image result */
+export type ImageResultOutput = z.infer<typeof imageResultSchema>;
+
+/** Inferred type for google_image_search structured output */
+export type GoogleImageSearchOutput = {
+  images: ImageResultOutput[];
+  query: string;
+  resultCount: number;
+};
+
+// ── Google News Search Output ─────────────────────────────────────────────────
+
+/**
+ * Schema for news article result
+ */
+export const newsResultSchema = z.object({
+  /** Article headline */
+  title: z.string().describe('Article headline'),
+  /** URL to the full article */
+  link: z.string().url().describe('URL to the full article'),
+  /** Article excerpt/snippet */
+  snippet: z.string().describe('Article excerpt or summary'),
+  /** News source domain */
+  source: z.string().describe('News source domain'),
+  /** Publication date if available */
+  publishedDate: z.string().optional().describe('Publication date if available'),
+});
+
+/**
+ * Structured output schema for google_news_search tool
+ */
+export const googleNewsSearchOutputSchema = {
+  /** Array of news articles */
+  articles: z.array(newsResultSchema).describe('List of news articles'),
+  /** The original search query */
+  query: z.string().describe('The search query that was executed'),
+  /** Number of articles found */
+  resultCount: z.number().int().min(0).describe('Number of articles found'),
+  /** Freshness filter used */
+  freshness: z.string().describe('Freshness filter that was applied'),
+  /** Sort order used */
+  sortedBy: z.enum(['relevance', 'date']).describe('Sort order used'),
+};
+
+/** Inferred type for news result */
+export type NewsResultOutput = z.infer<typeof newsResultSchema>;
+
+/** Inferred type for google_news_search structured output */
+export type GoogleNewsSearchOutput = {
+  articles: NewsResultOutput[];
+  query: string;
+  resultCount: number;
+  freshness: string;
+  sortedBy: 'relevance' | 'date';
 };

@@ -41,9 +41,15 @@ import {
   googleSearchOutputSchema,
   scrapePageOutputSchema,
   searchAndScrapeOutputSchema,
+  googleImageSearchOutputSchema,
+  googleNewsSearchOutputSchema,
   type GoogleSearchOutput,
   type ScrapePageOutput,
   type SearchAndScrapeOutput,
+  type GoogleImageSearchOutput,
+  type GoogleNewsSearchOutput,
+  type ImageResultOutput,
+  type NewsResultOutput,
   type CitationOutput,
   type SourceOutput,
 } from "./schemas/outputSchemas.js";
@@ -55,6 +61,20 @@ import {
 import { CircuitBreaker, CircuitOpenError } from "./shared/circuitBreaker.js";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { validateEnvironmentOrExit, getValidatedEnvValue } from "./shared/envValidator.js";
+import { scoreSource, scoreAndRankSources, type QualityScores } from "./shared/qualityScoring.js";
+import {
+  createAnnotatedContent,
+  annotateSearchResults,
+  annotateScrapedContent,
+  annotateResearchContent,
+  annotateImageResults,
+  annotateNewsResults,
+  annotateError,
+  AnnotationPresets,
+  type AnnotatedTextContent,
+} from "./shared/contentAnnotations.js";
+import { registerResources, trackSearch, type RecentSearch } from "./resources/index.js";
+import { registerPrompts } from "./prompts/index.js";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -787,6 +807,15 @@ function configureToolsAndResources(
                 resultCount: urls.length,
             };
 
+            // Track search for resources
+            trackSearch({
+                query,
+                timestamp: new Date().toISOString(),
+                resultCount: urls.length,
+                traceId,
+                tool: 'google_search',
+            });
+
             return {
                 content,
                 structuredContent,
@@ -981,6 +1010,27 @@ function configureToolsAndResources(
                 }
             });
 
+            // Apply quality scoring to successful sources
+            for (const scrape of successfulScrapes) {
+                const source = allSources.find(s => s.url === scrape.url);
+                if (source && source.success) {
+                    const qualityScores = scoreSource(
+                        scrape.url,
+                        scrape.content,
+                        trimmedQuery,
+                        source.citation?.metadata.publishedDate
+                    );
+                    source.qualityScore = qualityScores.overall;
+                }
+            }
+
+            // Sort successful scrapes by quality score for better content ordering
+            successfulScrapes.sort((a, b) => {
+                const scoreA = allSources.find(s => s.url === a.url)?.qualityScore ?? 0;
+                const scoreB = allSources.find(s => s.url === b.url)?.qualityScore ?? 0;
+                return scoreB - scoreA;
+            });
+
             logger.info('search_and_scrape: scraping done', { traceId, successful: successfulScrapes.length, total: urls.length });
 
             if (successfulScrapes.length === 0) {
@@ -1061,6 +1111,15 @@ function configureToolsAndResources(
                 },
             };
 
+            // Track search for resources
+            trackSearch({
+                query: trimmedQuery,
+                timestamp: new Date().toISOString(),
+                resultCount: successfulScrapes.length,
+                traceId,
+                tool: 'search_and_scrape',
+            });
+
             return {
                 content: [{
                     type: "text" as const,
@@ -1070,6 +1129,384 @@ function configureToolsAndResources(
             };
         }
     );
+
+    // ── google_image_search Tool ───────────────────────────────────────────────
+
+    /**
+     * Google Image Search parameters
+     */
+    interface GoogleImageSearchParams {
+        query: string;
+        num_results: number;
+        size?: 'huge' | 'icon' | 'large' | 'medium' | 'small' | 'xlarge' | 'xxlarge';
+        type?: 'clipart' | 'face' | 'lineart' | 'stock' | 'photo' | 'animated';
+        color_type?: 'color' | 'gray' | 'mono' | 'trans';
+        dominant_color?: string;
+        file_type?: 'jpg' | 'gif' | 'png' | 'bmp' | 'svg' | 'webp';
+        safe?: 'off' | 'medium' | 'high';
+        traceId?: string;
+    }
+
+    /**
+     * Builds a Google Image Search API URL
+     */
+    function buildGoogleImageSearchUrl(params: GoogleImageSearchParams): string {
+        const urlParams = new URLSearchParams({
+            key: process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!,
+            cx: process.env.GOOGLE_CUSTOM_SEARCH_ID!,
+            q: params.query,
+            num: String(params.num_results),
+            searchType: 'image',
+        });
+
+        if (params.size) urlParams.set('imgSize', params.size);
+        if (params.type) urlParams.set('imgType', params.type);
+        if (params.color_type) urlParams.set('imgColorType', params.color_type);
+        if (params.dominant_color) urlParams.set('imgDominantColor', params.dominant_color);
+        if (params.file_type) urlParams.set('fileType', params.file_type);
+        if (params.safe) urlParams.set('safe', params.safe);
+
+        return `https://www.googleapis.com/customsearch/v1?${urlParams.toString()}`;
+    }
+
+    server.registerTool(
+        "google_image_search",
+        {
+            title: "Google Image Search",
+            description: `Search for images using Google Custom Search API.
+
+Returns image URLs, thumbnails, dimensions, and source page URLs.
+
+**Best for:**
+- Finding visual content and reference images
+- Searching for illustrations, photos, or graphics
+- Locating specific types of images (clipart, photos, etc.)
+
+**Parameters:**
+- query: Search terms (required)
+- num_results: 1-10 images (default: 5)
+- size: huge, icon, large, medium, small, xlarge, xxlarge
+- type: clipart, face, lineart, stock, photo, animated
+- color_type: color, gray, mono (monochrome), trans (transparent)
+- dominant_color: Filter by dominant color
+- file_type: jpg, gif, png, bmp, svg, webp
+- safe: off, medium, high (safe search level)`,
+            inputSchema: {
+                query: z.string().min(1).max(500)
+                    .describe('The image search query'),
+                num_results: z.number().min(1).max(10).default(5)
+                    .describe('Number of image results to return'),
+                size: z.enum(['huge', 'icon', 'large', 'medium', 'small', 'xlarge', 'xxlarge']).optional()
+                    .describe('Filter by image size'),
+                type: z.enum(['clipart', 'face', 'lineart', 'stock', 'photo', 'animated']).optional()
+                    .describe('Filter by image type'),
+                color_type: z.enum(['color', 'gray', 'mono', 'trans']).optional()
+                    .describe('Filter by color type'),
+                dominant_color: z.enum(['black', 'blue', 'brown', 'gray', 'green', 'orange', 'pink', 'purple', 'red', 'teal', 'white', 'yellow']).optional()
+                    .describe('Filter by dominant color'),
+                file_type: z.enum(['jpg', 'gif', 'png', 'bmp', 'svg', 'webp']).optional()
+                    .describe('Filter by file format'),
+                safe: z.enum(['off', 'medium', 'high']).optional()
+                    .describe('Safe search level'),
+            },
+            outputSchema: googleImageSearchOutputSchema,
+            annotations: {
+                title: "Google Image Search",
+                readOnlyHint: true,
+                openWorldHint: true,
+            },
+        },
+        async ({ query, num_results = 5, size, type, color_type, dominant_color, file_type, safe }) => {
+            const traceId = randomUUID();
+            const trimmedQuery = query.trim();
+
+            logger.info('google_image_search invoked', {
+                traceId,
+                query: trimmedQuery,
+                num_results,
+                size,
+                type,
+            });
+
+            const url = buildGoogleImageSearchUrl({
+                query: trimmedQuery,
+                num_results,
+                size,
+                type,
+                color_type,
+                dominant_color,
+                file_type,
+                safe,
+                traceId,
+            });
+
+            try {
+                const resp = await googleSearchCircuit.execute(async () => {
+                    const r = await withTimeout(
+                        fetch(url, { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }),
+                        SEARCH_TIMEOUT_MS,
+                        'Google Image Search API'
+                    );
+                    if (!r.ok) {
+                        throw new Error(`Image Search API error ${r.status}`);
+                    }
+                    return r;
+                });
+
+                const data = await resp.json() as {
+                    items?: Array<{
+                        title: string;
+                        link: string;
+                        displayLink: string;
+                        image?: {
+                            thumbnailLink?: string;
+                            contextLink?: string;
+                            width?: number;
+                            height?: number;
+                            byteSize?: number;
+                        };
+                    }>;
+                };
+
+                const images: ImageResultOutput[] = (data.items || []).map((item) => ({
+                    title: item.title,
+                    link: item.link,
+                    thumbnailLink: item.image?.thumbnailLink,
+                    displayLink: item.displayLink,
+                    contextLink: item.image?.contextLink,
+                    width: item.image?.width,
+                    height: item.image?.height,
+                    fileSize: item.image?.byteSize?.toString(),
+                }));
+
+                // Track the search
+                trackSearch({
+                    query: trimmedQuery,
+                    timestamp: new Date().toISOString(),
+                    resultCount: images.length,
+                    traceId,
+                    tool: 'google_image_search',
+                });
+
+                // Build annotated content
+                const content = annotateImageResults(images, trimmedQuery);
+
+                const structuredContent: GoogleImageSearchOutput = {
+                    images,
+                    query: trimmedQuery,
+                    resultCount: images.length,
+                };
+
+                logger.info('google_image_search completed', {
+                    traceId,
+                    resultCount: images.length,
+                });
+
+                return { content, structuredContent };
+            } catch (err) {
+                const errorMsg = err instanceof Error ? sanitizeErrorMessage(err.message) : 'Unknown error';
+                logger.error('google_image_search failed', { traceId, error: errorMsg });
+                return {
+                    content: [annotateError(`Image search failed: ${errorMsg}`)],
+                    isError: true,
+                };
+            }
+        }
+    );
+
+    // ── google_news_search Tool ────────────────────────────────────────────────
+
+    /**
+     * Google News Search parameters
+     */
+    interface GoogleNewsSearchParams {
+        query: string;
+        num_results: number;
+        freshness: 'hour' | 'day' | 'week' | 'month' | 'year';
+        sort_by: 'relevance' | 'date';
+        news_source?: string;
+        traceId?: string;
+    }
+
+    /** Freshness to dateRestrict mapping for news */
+    const NEWS_FRESHNESS_MAP: Record<string, string> = {
+        hour: 'd1',  // Closest approximation
+        day: 'd1',
+        week: 'w1',
+        month: 'm1',
+        year: 'y1',
+    };
+
+    /**
+     * Builds a Google News Search API URL
+     */
+    function buildGoogleNewsSearchUrl(params: GoogleNewsSearchParams): string {
+        const urlParams = new URLSearchParams({
+            key: process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!,
+            cx: process.env.GOOGLE_CUSTOM_SEARCH_ID!,
+            q: params.query,
+            num: String(params.num_results),
+            dateRestrict: NEWS_FRESHNESS_MAP[params.freshness] || 'w1',
+        });
+
+        // Sort by date if requested
+        if (params.sort_by === 'date') {
+            urlParams.set('sort', 'date');
+        }
+
+        // Restrict to specific news source if provided
+        if (params.news_source) {
+            urlParams.set('siteSearch', params.news_source);
+            urlParams.set('siteSearchFilter', 'i'); // include only
+        }
+
+        return `https://www.googleapis.com/customsearch/v1?${urlParams.toString()}`;
+    }
+
+    server.registerTool(
+        "google_news_search",
+        {
+            title: "Google News Search",
+            description: `Search for recent news articles with freshness filters and date sorting.
+
+Ideal for current events, breaking news, and time-sensitive topics.
+
+**Best for:**
+- Finding recent news on a topic
+- Getting current events coverage
+- Time-sensitive research
+
+**Parameters:**
+- query: News search terms (required)
+- num_results: 1-10 articles (default: 5)
+- freshness: hour, day, week, month, year (default: week)
+- sort_by: relevance or date (default: relevance)
+- news_source: Restrict to a specific domain (e.g., 'bbc.com')`,
+            inputSchema: {
+                query: z.string().min(1).max(500)
+                    .describe('The news search query'),
+                num_results: z.number().min(1).max(10).default(5)
+                    .describe('Number of news results to return'),
+                freshness: z.enum(['hour', 'day', 'week', 'month', 'year']).default('week')
+                    .describe('How recent the news should be'),
+                sort_by: z.enum(['relevance', 'date']).default('relevance')
+                    .describe('Sort order: by relevance or by date (most recent first)'),
+                news_source: z.string().max(100).optional()
+                    .describe('Restrict to a specific news source domain'),
+            },
+            outputSchema: googleNewsSearchOutputSchema,
+            annotations: {
+                title: "Google News Search",
+                readOnlyHint: true,
+                openWorldHint: true,
+            },
+        },
+        async ({ query, num_results = 5, freshness = 'week', sort_by = 'relevance', news_source }) => {
+            const traceId = randomUUID();
+            const trimmedQuery = query.trim();
+
+            logger.info('google_news_search invoked', {
+                traceId,
+                query: trimmedQuery,
+                num_results,
+                freshness,
+                sort_by,
+            });
+
+            const url = buildGoogleNewsSearchUrl({
+                query: trimmedQuery,
+                num_results,
+                freshness,
+                sort_by,
+                news_source,
+                traceId,
+            });
+
+            try {
+                const resp = await googleSearchCircuit.execute(async () => {
+                    const r = await withTimeout(
+                        fetch(url, { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }),
+                        SEARCH_TIMEOUT_MS,
+                        'Google News Search API'
+                    );
+                    if (!r.ok) {
+                        throw new Error(`News Search API error ${r.status}`);
+                    }
+                    return r;
+                });
+
+                const data = await resp.json() as {
+                    items?: Array<{
+                        title: string;
+                        link: string;
+                        snippet: string;
+                        displayLink: string;
+                        pagemap?: {
+                            metatags?: Array<{
+                                'article:published_time'?: string;
+                                'og:updated_time'?: string;
+                            }>;
+                        };
+                    }>;
+                };
+
+                const articles: NewsResultOutput[] = (data.items || []).map((item) => ({
+                    title: item.title,
+                    link: item.link,
+                    snippet: item.snippet || '',
+                    source: item.displayLink,
+                    publishedDate:
+                        item.pagemap?.metatags?.[0]?.['article:published_time'] ||
+                        item.pagemap?.metatags?.[0]?.['og:updated_time'],
+                }));
+
+                // Track the search
+                trackSearch({
+                    query: trimmedQuery,
+                    timestamp: new Date().toISOString(),
+                    resultCount: articles.length,
+                    traceId,
+                    tool: 'google_news_search',
+                });
+
+                // Build annotated content
+                const content = annotateNewsResults(articles, trimmedQuery);
+
+                const structuredContent: GoogleNewsSearchOutput = {
+                    articles,
+                    query: trimmedQuery,
+                    resultCount: articles.length,
+                    freshness,
+                    sortedBy: sort_by,
+                };
+
+                logger.info('google_news_search completed', {
+                    traceId,
+                    resultCount: articles.length,
+                });
+
+                return { content, structuredContent };
+            } catch (err) {
+                const errorMsg = err instanceof Error ? sanitizeErrorMessage(err.message) : 'Unknown error';
+                logger.error('google_news_search failed', { traceId, error: errorMsg });
+                return {
+                    content: [annotateError(`News search failed: ${errorMsg}`)],
+                    isError: true,
+                };
+            }
+        }
+    );
+
+    // ── Register MCP Resources and Prompts ─────────────────────────────────────
+
+    // Register resources for exposing server state
+    registerResources(server, globalCacheInstance, eventStoreInstance, {
+        version: PKG_VERSION,
+        startTime: new Date(),
+    });
+
+    // Register prompts for research workflows
+    registerPrompts(server);
 }
 
 
