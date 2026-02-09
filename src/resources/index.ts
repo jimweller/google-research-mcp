@@ -164,6 +164,8 @@ export function registerResources(
                   'google_news_search',
                   'scrape_page',
                   'search_and_scrape',
+                  'sequential_search',
+                  'academic_search',
                 ],
                 limits: {
                   maxScrapeContentSize: '50 KB',

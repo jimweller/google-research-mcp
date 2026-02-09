@@ -75,6 +75,8 @@ graph TD
         I[search_and_scrape]
         IMG[google_image_search]
         NEWS[google_news_search]
+        SEQ[sequential_search]
+        ACAD[academic_search]
         YT[YouTube Transcript Extractor]
         QS[Quality Scoring]
     end
@@ -82,12 +84,14 @@ graph TD
     subgraph "MCP Primitives"
         RES[Resources]
         PROMPTS[Prompts]
+        SAMP[Sampling]
     end
 
     subgraph "External Services"
         M[Google Search API]
         N[Web Pages]
         P[YouTube Transcript API]
+        SS[Semantic Scholar API]
     end
 
     A -- Connects via --> B
@@ -103,29 +107,38 @@ graph TD
     E -- Invokes --> I
     E -- Invokes --> IMG
     E -- Invokes --> NEWS
+    E -- Invokes --> SEQ
+    E -- Invokes --> ACAD
 
     D -- Exposes --> RES
     D -- Exposes --> PROMPTS
+    D -- Exposes --> SAMP
 
     G -- Uses --> YT
     I -- Uses --> QS
+    SEQ -- Uses --> F
+    SEQ -- Uses --> G
 
     F -- Calls --> M
     G -- Calls --> N
     IMG -- Calls --> M
     NEWS -- Calls --> M
     YT -- Calls --> P
+    ACAD -- Calls --> SS
 
     I -- Uses --> F
     I -- Uses --> G
 
-    F & G & I & IMG & NEWS & YT -- Use for caching --> J
+    F & G & I & IMG & NEWS & SEQ & ACAD & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
 
     style YT fill:#cce5ff,stroke:#333,stroke-width:2px
     style QS fill:#d4edda,stroke:#333,stroke-width:2px
+    style SEQ fill:#e6ffe6,stroke:#333,stroke-width:2px
+    style ACAD fill:#ffe6f0,stroke:#333,stroke-width:2px
     style RES fill:#fff3cd,stroke:#333,stroke-width:2px
     style PROMPTS fill:#fff3cd,stroke:#333,stroke-width:2px
+    style SAMP fill:#fff3cd,stroke:#333,stroke-width:2px
 
     style J fill:#e6f2ff,stroke:#333,stroke-width:2px
     style K fill:#e6ffe6,stroke:#333,stroke-width:2px
