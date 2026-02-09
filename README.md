@@ -72,8 +72,6 @@ The assistant will use the `google_news_search` tool and return current articles
 | Complex multi-step investigation | `sequential_search` — tracks progress across 3+ searches, supports branching |
 | Find academic papers | `academic_search` — searches arXiv, PubMed, IEEE with citations (APA, MLA, BibTeX) |
 | Search patents | `patent_search` — Google Patents for prior art, FTO analysis |
-| Build patent portfolio for a company | `patent_assignee_search` — all patents for an assignee with status and technology distribution |
-| Get details on a specific patent | `patent_details` — full metadata, citations, claims, and expiration status |
 | Find recent news | `google_news_search` — with freshness filtering and date sorting |
 | Find images | `google_image_search` — with size/type/color filtering |
 | Get a list of URLs only | `google_search` — when you need URLs but will process pages yourself |
@@ -152,8 +150,6 @@ The assistant will use the `google_news_search` tool and return current articles
 | **`sequential_search`** | **Complex investigations** | 3+ searches needed with different angles, or research you might abandon early. Tracks progress, supports branching. You reason; it tracks state. |
 | **`academic_search`** | **Peer-reviewed papers** | Research requiring authoritative academic sources. Returns papers with citations (APA, MLA, BibTeX), abstracts, and PDF links. |
 | **`patent_search`** | **Patent research** | Prior art search, freedom to operate (FTO) analysis, patent landscaping. Returns patents with numbers, assignees, inventors, and PDF links. |
-| **`patent_assignee_search`** | **Patent portfolios** | Building patent portfolios for a company, tracking competitor activity, M&A due diligence. Requires PatentsView API key. |
-| **`patent_details`** | **Patent deep-dive** | Get full details on a specific patent including citations, claims, status, and expiration. Requires PatentsView API key. |
 | **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or want to process pages yourself with custom logic. |
 | **`google_image_search`** | Finding images | You need visual content — photos, illustrations, graphics. For text research, use search_and_scrape. |
 | **`google_news_search`** | Current news | You need recent news articles. Use scrape_page on results to read full articles. |
@@ -261,37 +257,6 @@ Searches Google Patents for prior art, freedom to operate (FTO) analysis, and pa
 | `year_from` | number | - | Filter by min year |
 | `year_to` | number | - | Filter by max year |
 
-#### `patent_assignee_search`
-Searches all patents for a specific company/assignee using the PatentsView API. Ideal for building patent portfolios, tracking competitor activity, and M&A due diligence. Requires a free PatentsView API key.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `assignee` | string | required | Company/organization name to search for |
-| `assignee_type` | string | any | `any`, `us_company`, `foreign_company`, `us_individual`, `foreign_individual`, `government` |
-| `patent_type` | string | any | `any`, `utility`, `design`, `plant`, `reissue` |
-| `date_from` | string | - | Filter patents granted on or after (YYYY-MM-DD) |
-| `date_to` | string | - | Filter patents granted on or before (YYYY-MM-DD) |
-| `include_expired` | boolean | true | Include patents that have expired |
-| `page` | number | 1 | Page number for pagination |
-| `per_page` | number | 25 | Results per page (max 100) |
-
-**Returns:** Patent list with status (active/expired), technology distribution by CPC codes, summary aggregations by status/type/year.
-
-**Note:** Requires `PATENTSVIEW_API_KEY` environment variable. Get a free key at [patentsview.org/apis/keyrequest](https://patentsview.org/apis/keyrequest).
-
-#### `patent_details`
-Gets comprehensive details for a specific patent including citations and claims. Uses the PatentsView API for detailed patent information.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `patent_id` | string | required | Patent number (e.g., "11886826", "US11886826", "US11886826B1") |
-| `include_citations` | boolean | false | Include patents this patent cites and patents that cite this one |
-| `include_claims` | boolean | false | Include patent claims text (increases response size) |
-
-**Returns:** Full patent metadata (title, abstract, dates), assignee and inventor details with locations, CPC classification codes, calculated expiration date and status (active/expired), and optionally citation data and claims text.
-
-**Note:** Requires `PATENTSVIEW_API_KEY` environment variable. Get a free key at [patentsview.org/apis/keyrequest](https://patentsview.org/apis/keyrequest).
-
 ## Features
 
 ### Core Capabilities
@@ -305,9 +270,9 @@ Gets comprehensive details for a specific patent including citations and claims.
 ### MCP Protocol Support
 | Feature | Description |
 |---------|-------------|
-| **Tools** | 10 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search`, `patent_search`, `patent_assignee_search`, `patent_details` |
+| **Tools** | 8 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search`, `patent_search` |
 | **Resources** | Expose server state (recent searches, cache stats, config) |
-| **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing`, `patent-portfolio-analysis` |
+| **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing` |
 | **Annotations** | Content tagged with audience, priority, and timestamps |
 
 ### Production Ready
