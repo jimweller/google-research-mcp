@@ -35,6 +35,8 @@
     "dist/**/*",
     "README.md",
     "LICENSE",
+    "llms.txt",
+    "llms-full.txt",
     "docs/**/*.md"
   ],
   "publishConfig": {

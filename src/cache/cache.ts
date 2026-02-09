@@ -1,6 +1,7 @@
 // src/cache/cache.ts
 import { createHash } from "crypto";
 import { CacheEntry } from "./types.js";
+import { logger } from "../shared/logger.js";
 
 /**
  * Generic in-memory cache implementation with advanced features
@@ -59,7 +60,7 @@ export class Cache {
         try {
           this.cleanExpiredEntries();
         } catch (error) {
-          console.error("Error during periodic cache cleanup:", error);
+          logger.error("Error during periodic cache cleanup", { error: error instanceof Error ? error.message : String(error) });
         }
       }, 60 * 1000); // Every minute
 
@@ -138,7 +139,7 @@ export class Cache {
     if (staleWhileRevalidate && cached && cached.staleUntil && cached.staleUntil > currentTime) { // Use currentTime
       // Value is stale but still usable - trigger background refresh
       this.metrics.hits++;
-      console.log(`Serving stale content for ${namespace} while revalidating`);
+      logger.debug("Serving stale content while revalidating", { namespace });
       
       // Background revalidation (don't await)
       this.revalidateInBackground(namespace, args, key, computeFn, options);
@@ -173,7 +174,7 @@ export class Cache {
       return value;
     } catch (error) {
       // Don't cache errors
-      console.error(`Cache computation error for ${namespace}:`, error);
+      logger.error("Cache computation error", { namespace, error: error instanceof Error ? error.message : String(error) });
       this.metrics.errors++;
       throw error;
     } finally {
@@ -216,10 +217,10 @@ export class Cache {
         staleUntil: options.staleWhileRevalidate ? storeTime + ttl + (options.staleTime ?? 60 * 1000) : undefined // Use storeTime
       });
       
-      console.log(`Background revalidation completed for ${namespace}`);
+      logger.debug("Background revalidation completed", { namespace });
     } catch (error) {
       // Log but don't throw - this is a background operation
-      console.error(`Background revalidation failed for ${namespace}:`, error);
+      logger.error("Background revalidation failed", { namespace, error: error instanceof Error ? error.message : String(error) });
       // Keep the stale value in cache
     }
   }
@@ -285,7 +286,7 @@ export class Cache {
     }
     
     if (expiredCount > 0) {
-      console.log(`Cleaned ${expiredCount} expired cache entries`);
+      logger.debug("Cleaned expired cache entries", { count: expiredCount });
     }
   }
   
@@ -314,7 +315,7 @@ export class Cache {
       this.metrics.evictions++;
     }
     
-    console.log(`Evicted ${sortedEntries.length} LRU cache entries`);
+    logger.debug("Evicted LRU cache entries", { count: sortedEntries.length });
   }
 
   /**

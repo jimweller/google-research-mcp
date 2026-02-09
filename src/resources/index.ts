@@ -204,12 +204,7 @@ export function registerResources(
             text: JSON.stringify(
               {
                 ...stats,
-                hitRate:
-                  stats.hits + stats.misses > 0
-                    ? ((stats.hits / (stats.hits + stats.misses)) * 100).toFixed(
-                        1
-                      ) + '%'
-                    : 'N/A',
+                // hitRatio is already computed in stats.metrics.hitRatio
                 generatedAt: new Date().toISOString(),
               },
               null,

@@ -133,8 +133,24 @@ const SCRAPE_TIMEOUT_MS = 15_000;
 /** Minimum content length to consider a Cheerio scrape successful (bytes) */
 const MIN_CHEERIO_CONTENT_LENGTH = 100;
 
+/** Minimum meaningful text ratio to consider content valid (not just JS shell) */
+const MIN_MEANINGFUL_TEXT_RATIO = 0.1;
+
+/** Known SPA domains that require JavaScript rendering */
+const SPA_DOMAINS = [
+    'patents.google.com',
+    'scholar.google.com',
+    'news.google.com',
+    'trends.google.com',
+    'twitter.com',
+    'x.com',
+    'linkedin.com',
+    'facebook.com',
+    'instagram.com',
+];
+
 /** Timeout for Playwright-based scraping (seconds) */
-const PLAYWRIGHT_TIMEOUT_SECS = 20;
+const PLAYWRIGHT_TIMEOUT_SECS = 30;
 
 /** Cache TTL for search results (30 minutes) */
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -563,6 +579,61 @@ function configureToolsAndResources(
     }
 
     /**
+     * Check if a URL belongs to a known Single Page Application (SPA) domain
+     * that requires JavaScript rendering to display content.
+     */
+    function isKnownSpaDomain(url: string): boolean {
+        try {
+            const hostname = new URL(url).hostname.toLowerCase();
+            return SPA_DOMAINS.some(domain => hostname === domain || hostname.endsWith('.' + domain));
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Check if scraped content appears to be a JavaScript shell with no meaningful text.
+     * SPAs often return HTML with lots of script tags but minimal readable content.
+     */
+    function isMeaningfulContent(content: string, rawHtml?: string): boolean {
+        // If content is very short, it's not meaningful
+        if (content.length < MIN_CHEERIO_CONTENT_LENGTH) {
+            return false;
+        }
+
+        // Extract just the text portions (after "Body:" or "Paragraphs:")
+        const bodyMatch = content.match(/Body:\s*(.*)$/s);
+        const paragraphsMatch = content.match(/Paragraphs:\s*(.*?)(?=Body:|$)/s);
+
+        const bodyText = bodyMatch?.[1]?.trim() || '';
+        const paragraphsText = paragraphsMatch?.[1]?.trim() || '';
+        const meaningfulText = bodyText + ' ' + paragraphsText;
+
+        // Check if there's actual readable content vs just JavaScript/JSON
+        const cleanText = meaningfulText
+            .replace(/\{[^}]*\}/g, '')  // Remove JSON objects
+            .replace(/\[[^\]]*\]/g, '') // Remove JSON arrays
+            .replace(/function\s*\([^)]*\)\s*\{[^}]*\}/g, '') // Remove inline functions
+            .replace(/var\s+\w+\s*=/g, '') // Remove variable declarations
+            .replace(/https?:\/\/[^\s]+/g, '') // Remove URLs
+            .replace(/[^\w\s]/g, ' ')    // Remove special chars
+            .replace(/\s+/g, ' ')        // Normalize whitespace
+            .trim();
+
+        // If clean text is too short relative to raw content, it's likely a JS shell
+        if (rawHtml && cleanText.length < rawHtml.length * MIN_MEANINGFUL_TEXT_RATIO) {
+            return false;
+        }
+
+        // If clean text is very short in absolute terms
+        if (cleanText.length < 200) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Scrape a URL using CheerioCrawler (static HTML only, fast).
      * Returns both the processed content and citation metadata.
      */
@@ -644,7 +715,51 @@ function configureToolsAndResources(
         });
         const crawler = new PlaywrightCrawler({
             requestHandler: async ({ page }) => {
-                await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+                // Wait for initial load
+                await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
+
+                // For SPAs, wait for network to settle and give JS time to render
+                await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+
+                // Check if this is Google Patents - needs special handling
+                const isGooglePatents = url.includes('patents.google.com');
+
+                if (isGooglePatents) {
+                    // Google Patents loads results via XHR after initial render
+                    // Wait for the search results container to appear
+                    logger.debug('Google Patents detected, waiting for results to load', { url: sanitizeUrl(url) });
+
+                    // Wait longer for Google Patents initial load
+                    await page.waitForTimeout(3000);
+
+                    // Try to wait for search result items specifically
+                    await Promise.race([
+                        page.waitForSelector('search-result-item, .search-result-item, [data-result], state-manager search-results', { timeout: 10000 }),
+                        page.waitForTimeout(5000)
+                    ]).catch(() => {});
+
+                    // Scroll down to trigger lazy loading of more results
+                    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+                    await page.waitForTimeout(2000);
+
+                    // Scroll back up and wait for any additional content
+                    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+                    await page.waitForTimeout(1000);
+                } else {
+                    // Standard SPA handling
+                    // Additional wait for dynamic content (SPAs often load data after networkidle)
+                    await page.waitForTimeout(2000);
+
+                    // Try to wait for common content indicators
+                    await Promise.race([
+                        page.waitForSelector('article, main, [role="main"], .results, .search-results, #results', { timeout: 5000 }),
+                        page.waitForTimeout(3000)
+                    ]).catch(() => {});
+
+                    // Scroll to trigger any lazy loading
+                    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2)).catch(() => {});
+                    await page.waitForTimeout(1000);
+                }
 
                 // Capture raw HTML for citation extraction
                 rawHtml = await page.content();
@@ -658,23 +773,87 @@ function configureToolsAndResources(
                 }
 
                 const title = await page.title();
-                const extracted = await page.evaluate(() => {
-                    const h = Array.from(document.querySelectorAll('h1, h2, h3'))
-                        .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
-                    const p = Array.from(document.querySelectorAll('p'))
-                        .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
-                    const body = document.body?.innerText?.replace(/\s+/g, ' ').trim() || '';
-                    return { headings: h, paragraphs: p, bodyText: body };
-                });
-                pageContent = `Title: ${title}\nHeadings: ${extracted.headings}\nParagraphs: ${extracted.paragraphs}\nBody: ${extracted.bodyText}`;
+
+                // Use specialized extraction for Google Patents
+                if (isGooglePatents) {
+                    const patentData = await page.evaluate(() => {
+                        // Try to find patent result items using various selectors
+                        const resultItems = Array.from(document.querySelectorAll('search-result-item, .result-item, [data-result], article'));
+                        const patents: string[] = [];
+
+                        for (const item of resultItems) {
+                            const text = item.textContent?.trim();
+                            if (text && text.length > 20) {
+                                patents.push(text.replace(/\s+/g, ' ').substring(0, 500));
+                            }
+                        }
+
+                        // Also try to get structured data from the page
+                        const links = Array.from(document.querySelectorAll('a[href*="/patent/"]'));
+                        const patentLinks = links.map(a => {
+                            const href = a.getAttribute('href') || '';
+                            const text = a.textContent?.trim() || '';
+                            return `${text} (${href})`;
+                        }).filter(p => p.length > 10);
+
+                        // Get the main body text as fallback
+                        const body = document.body?.innerText?.replace(/\s+/g, ' ').trim() || '';
+
+                        return {
+                            patents,
+                            patentLinks,
+                            body,
+                            resultsCount: resultItems.length + patentLinks.length
+                        };
+                    });
+
+                    logger.debug('Google Patents extraction results', {
+                        url: sanitizeUrl(url),
+                        patentCount: patentData.patents.length,
+                        linkCount: patentData.patentLinks.length,
+                        bodyLength: patentData.body.length
+                    });
+
+                    // Build content with patent results
+                    let content = `Title: ${title}\n\n`;
+                    if (patentData.patentLinks.length > 0) {
+                        content += `Patent Links Found (${patentData.patentLinks.length}):\n${patentData.patentLinks.join('\n')}\n\n`;
+                    }
+                    if (patentData.patents.length > 0) {
+                        content += `Patent Results (${patentData.patents.length}):\n${patentData.patents.join('\n---\n')}\n\n`;
+                    }
+                    content += `Full Page Content:\n${patentData.body}`;
+                    pageContent = content;
+                } else {
+                    // Standard extraction for other sites
+                    const extracted = await page.evaluate(() => {
+                        const h = Array.from(document.querySelectorAll('h1, h2, h3'))
+                            .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
+                        const p = Array.from(document.querySelectorAll('p'))
+                            .map(el => el.textContent?.trim()).filter(Boolean).join(' ');
+                        const body = document.body?.innerText?.replace(/\s+/g, ' ').trim() || '';
+                        return { headings: h, paragraphs: p, bodyText: body };
+                    });
+                    pageContent = `Title: ${title}\nHeadings: ${extracted.headings}\nParagraphs: ${extracted.paragraphs}\nBody: ${extracted.bodyText}`;
+                }
             },
             requestHandlerTimeoutSecs: PLAYWRIGHT_TIMEOUT_SECS,
             maxRequestsPerCrawl: 1,
             maxRequestRetries: 0,
             useSessionPool: false,
-            headless: true,
             launchContext: {
-                launchOptions: { args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'] }
+                launchOptions: {
+                    headless: true,
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-gpu',
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--window-size=1920,1080',
+                    ],
+                },
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
         }, crawlerConfig);
         const crawlPromise = crawler.run([{ url }]);
@@ -758,12 +937,24 @@ function configureToolsAndResources(
                     }
                     // Documents don't have HTML-based citation metadata
                 } else {
-                    // Circuit breaker + tiered scraping: fast static HTML first, JS rendering fallback
+                    // Circuit breaker + tiered scraping strategy:
+                    // 1. Known SPA domains → go directly to Playwright
+                    // 2. Other sites → try Cheerio first, fallback to Playwright if content is not meaningful
                     const scrapeResult = await webScrapingCircuit.execute(async () => {
+                        // For known SPA domains, skip Cheerio entirely
+                        if (isKnownSpaDomain(url)) {
+                            logger.info('Known SPA domain detected, using Playwright directly', {
+                                traceId, url: sanitizeUrl(url)
+                            });
+                            return await scrapeWithPlaywright(url);
+                        }
+
+                        // Try fast Cheerio scrape first
                         let result = await scrapeWithCheerio(url);
 
-                        if (result.content.length < MIN_CHEERIO_CONTENT_LENGTH) {
-                            logger.info('Cheerio returned insufficient content, falling back to Playwright', {
+                        // Check if content is meaningful (not just a JS shell)
+                        if (!isMeaningfulContent(result.content, result.rawHtml)) {
+                            logger.info('Cheerio returned non-meaningful content (likely SPA), falling back to Playwright', {
                                 traceId, url: sanitizeUrl(url), cheerioLength: result.content.length
                             });
                             result = await scrapeWithPlaywright(url);
@@ -1821,7 +2012,13 @@ function configureToolsAndResources(
 - Filing and publication dates
 - Direct links to Google Patents and PDFs
 - Filter by patent office (USPTO, EPO, WIPO, JPO, CNIPA, KIPO)
-- Filter by assignee, inventor, CPC code, year range
+- Assignee search with automatic name variations
+
+**Important limitation:** Google Custom Search doesn't index ALL patents. For comprehensive company patent research:
+1. Use this tool for initial discovery with technology keywords
+2. Use scrape_page on patents.google.com/?assignee=CompanyName for more complete results
+3. Try multiple variations: company names without spaces, previous names, inventor names
+4. Note that patents may be assigned to parent companies or subsidiaries
 
 **Search types:**
 - prior_art: Find related existing patents
@@ -1985,8 +2182,8 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
    * @param body - The request body
    * @returns True if this is an initialization request
    */
-  function isInitializeRequest(body: any): boolean {
-    return body.method === "initialize";
+  function isInitializeRequest(body: unknown): boolean {
+    return typeof body === 'object' && body !== null && 'method' in body && (body as { method: unknown }).method === "initialize";
   }
 
   // Create MCP server instance
@@ -2031,7 +2228,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
    * @param body - The request body
    * @returns True if this is a batch request
    */
-  function isBatchRequest(body: any): boolean {
+  function isBatchRequest(body: unknown): body is unknown[] {
     return Array.isArray(body);
   }
 

@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
 import { CacheEntry, CacheMetadata, IPersistenceManager, PersistedCacheEntry } from './types.js';
+import { logger } from '../shared/logger.js';
 
 /**
  * Manages persistence of cache entries to disk
@@ -58,7 +59,7 @@ export class PersistenceManager implements IPersistenceManager {
       await fs.mkdir(this.namespacesPath, { recursive: true });
       this.directoriesEnsured = true;
     } catch (error) {
-      console.error('Error creating storage directories:', error);
+      logger.error('Error creating storage directories', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to create storage directories');
     }
   }
@@ -209,7 +210,7 @@ export class PersistenceManager implements IPersistenceManager {
         await fs.rename(tempPath, entryPath);
       }
     } catch (error) {
-      console.error(`Error saving cache entry ${namespace}:${key}:`, error);
+      logger.error('Error saving cache entry', { namespace, key, error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to save cache entry ${namespace}:${key}`);
     }
   }
@@ -240,7 +241,7 @@ export class PersistenceManager implements IPersistenceManager {
           const persistedEntry = JSON.parse(data) as PersistedCacheEntry<T>;
           return this.deserializeEntry(persistedEntry);
         } catch (parseError) {
-          console.error(`Error parsing JSON for cache entry ${namespace}:${key}:`, parseError);
+          logger.error('Error parsing JSON for cache entry', { namespace, key, error: parseError instanceof Error ? parseError.message : String(parseError) });
           // If JSON parsing fails, the file might be corrupted
           // Remove the corrupted file and return undefined
           try {
@@ -258,7 +259,7 @@ export class PersistenceManager implements IPersistenceManager {
         throw error;
       }
     } catch (error) {
-      console.error(`Error loading cache entry ${namespace}:${key}:`, error);
+      logger.error('Error loading cache entry', { namespace, key, error: error instanceof Error ? error.message : String(error) });
       return undefined;
     }
   }
@@ -298,7 +299,7 @@ export class PersistenceManager implements IPersistenceManager {
       // Update metadata
       await this.updateMetadata(entries);
     } catch (error) {
-      console.error('Error saving all cache entries:', error);
+      logger.error('Error saving all cache entries', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to save all cache entries');
     }
   }
@@ -345,7 +346,7 @@ export class PersistenceManager implements IPersistenceManager {
       // Write metadata to disk
       await fs.writeFile(this.metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
     } catch (error) {
-      console.error('Error updating metadata:', error);
+      logger.error('Error updating metadata', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to update metadata');
     }
   }
@@ -416,7 +417,7 @@ export class PersistenceManager implements IPersistenceManager {
             // Add to namespace map
             namespaceEntries.set(persistedEntry.key, this.deserializeEntry(persistedEntry));
           } catch (error) {
-            console.error(`Error loading entry ${entryPath}:`, error);
+            logger.error('Error loading entry', { entryPath, error: error instanceof Error ? error.message : String(error) });
             // Skip this entry
           }
         }
@@ -424,7 +425,7 @@ export class PersistenceManager implements IPersistenceManager {
       
       return entries;
     } catch (error) {
-      console.error('Error loading all cache entries:', error);
+      logger.error('Error loading all cache entries', { error: error instanceof Error ? error.message : String(error) });
       return new Map();
     }
   }
@@ -481,7 +482,7 @@ export class PersistenceManager implements IPersistenceManager {
       // Write metadata to disk
       await fs.writeFile(this.metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
     } catch (error) {
-      console.error('Error clearing cache:', error);
+      logger.error('Error clearing cache', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to clear cache');
     }
   }
@@ -515,7 +516,7 @@ export class PersistenceManager implements IPersistenceManager {
         }
       }
     } catch (error) {
-      console.error(`Error removing cache entry ${namespace}:${key}:`, error);
+      logger.error('Error removing cache entry', { namespace, key, error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to remove cache entry ${namespace}:${key}`);
     }
   }

@@ -21,6 +21,17 @@ import jwksClient from 'jwks-rsa';
 import { PersistentCache } from '../cache/index.js';
 import { CacheEntry } from '../cache/types.js';
 import { hasRequiredScopes } from './oauthScopes.js';
+import { logger } from './logger.js';
+
+/**
+ * Extended Request type with OAuth information
+ */
+export interface OAuthRequest extends Request {
+  oauth?: {
+    token: DecodedToken;
+    scopes: string[];
+  };
+}
 
 /**
  * Configuration options for the OAuth middleware
@@ -72,9 +83,9 @@ interface DecodedToken {
   
   /** Token scopes (space-separated string or array of strings) */
   scope?: string | string[];
-  
+
   /** Any additional custom claims */
-  [key: string]: any;
+  [key: string]: string | string[] | number | boolean | undefined;
 }
 
 /**
@@ -179,7 +190,7 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
         }
       );
     } catch (error) {
-      console.error('Error getting signing key:', error);
+      logger.error('Error getting signing key', { error: error instanceof Error ? error.message : String(error) });
       throw new OAuthTokenError('Unable to verify token signature', 'invalid_token');
     }
   }
@@ -235,7 +246,7 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
         throw new OAuthTokenError('Token not yet valid', 'invalid_token');
       }
       
-      console.error('Token verification error:', error);
+      logger.error('Token verification error', { error: error instanceof Error ? error.message : String(error) });
       throw new OAuthTokenError('Invalid token', 'invalid_token');
     }
   }
@@ -302,7 +313,7 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
       const scopes = extractScopes(decodedToken);
 
       // Attach token and scopes to the request for later use
-      (req as any).oauth = {
+      (req as OAuthRequest).oauth = {
         token: decodedToken,
         scopes
       };
@@ -316,7 +327,7 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
         });
       }
 
-      console.error('OAuth middleware error:', error);
+      logger.error('OAuth middleware error', { error: error instanceof Error ? error.message : String(error) });
       return res.status(401).json({
         error: 'invalid_token',
         error_description: 'An error occurred while validating the token'
@@ -333,15 +344,16 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
  */
 export function requireScopes(requiredScopes: string[]) {
   return function scopeMiddleware(req: Request, res: Response, next: NextFunction) {
+    const oauthReq = req as OAuthRequest;
     // Check if oauth object exists (token was validated)
-    if (!(req as any).oauth) {
+    if (!oauthReq.oauth) {
       return res.status(401).json({
         error: 'invalid_token',
         error_description: 'No valid token provided'
       });
     }
 
-    const { scopes } = (req as any).oauth;
+    const { scopes } = oauthReq.oauth;
 
     // Check if token has required scopes
     if (!hasRequiredScopes(scopes, requiredScopes)) {

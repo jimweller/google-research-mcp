@@ -43,6 +43,10 @@ export function registerPrompts(server: McpServer): void {
   registerFactCheck(server);
   registerSummarizeUrl(server);
   registerNewsBriefing(server);
+  registerPatentPortfolioAnalysis(server);
+  registerCompetitiveAnalysis(server);
+  registerLiteratureReview(server);
+  registerTechnicalDeepDive(server);
 }
 
 // ── Individual Prompt Implementations ────────────────────────────────────────
@@ -333,6 +337,395 @@ Begin by searching for recent news on this topic.`,
   );
 }
 
+// ── Patent Portfolio Analysis ─────────────────────────────────────────────────
+
+/**
+ * Registers the patent-portfolio-analysis prompt
+ */
+function registerPatentPortfolioAnalysis(server: McpServer): void {
+  server.prompt(
+    'patent-portfolio-analysis',
+    {
+      company: z
+        .string()
+        .min(1)
+        .max(200)
+        .describe('The company name to analyze (include known subsidiaries)'),
+      includeSubsidiaries: z
+        .boolean()
+        .default(true)
+        .describe('Whether to search for subsidiary company patents'),
+    },
+    async ({ company, includeSubsidiaries = true }) => ({
+      messages: [
+        {
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: `Conduct a comprehensive patent portfolio analysis for:
+
+**Company:** ${company}
+**Include Subsidiaries:** ${includeSubsidiaries ? 'Yes' : 'No'}
+
+**Research Process:**
+1. Use \`scrape_page\` on \`https://patents.google.com/?assignee=${encodeURIComponent(company)}\` to get the full patent list
+${includeSubsidiaries ? `2. Search for known subsidiaries and acquisitions using \`search_and_scrape\`
+3. Scrape patent pages for each subsidiary found` : ''}
+4. Compile all patents into a unified analysis
+
+**Output Format:**
+
+## Executive Summary
+(Overview of patent portfolio strength, focus areas, key findings)
+
+## Patent Portfolio Overview
+| Metric | Value |
+|--------|-------|
+| Total Patents | [count] |
+| Granted vs Pending | [breakdown] |
+| Date Range | [earliest] - [latest] |
+| Primary Assignees | [list] |
+
+## Patents by Technology Area
+(Group patents by CPC classification or technology theme)
+
+| Technology Area | Count | Key Patents |
+|-----------------|-------|-------------|
+| [Area 1] | [n] | [Patent numbers] |
+
+## Complete Patent List
+| # | Patent Number | Title | Assignee | Status | Priority Date | Key Claims |
+|---|--------------|-------|----------|--------|---------------|------------|
+
+## Key Inventors
+| Inventor | Patent Count | Primary Technologies |
+|----------|--------------|---------------------|
+
+## Competitive Positioning
+(How this portfolio compares to industry, any gaps or strengths)
+
+## Recommendations
+(Actionable insights based on the analysis)
+
+---
+
+Begin by scraping the Google Patents page for ${company}.`,
+          },
+        },
+      ],
+    })
+  );
+}
+
+// ── Competitive Analysis ──────────────────────────────────────────────────────
+
+/**
+ * Registers the competitive-analysis prompt
+ */
+function registerCompetitiveAnalysis(server: McpServer): void {
+  server.prompt(
+    'competitive-analysis',
+    {
+      entities: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('Comma-separated list of companies/products to compare'),
+      aspects: z
+        .string()
+        .max(500)
+        .optional()
+        .describe('Specific aspects to compare (e.g., pricing, features, market share)'),
+    },
+    async ({ entities, aspects }) => {
+      const entityList = entities.split(',').map((e) => e.trim());
+
+      return {
+        messages: [
+          {
+            role: 'user' as const,
+            content: {
+              type: 'text' as const,
+              text: `Conduct a competitive analysis comparing:
+
+**Entities:** ${entityList.join(', ')}
+${aspects ? `**Focus Areas:** ${aspects}` : '**Focus Areas:** Features, market position, strengths, weaknesses'}
+
+**Research Process:**
+1. Use \`search_and_scrape\` to research each entity:
+${entityList.map((e, i) => `   ${i + 1}. Search for "${e} company overview features""`).join('\n')}
+2. Search for direct comparison articles: "${entityList.join(' vs ')}"
+3. Look for industry analysis and market reports
+
+**Output Format:**
+
+## Executive Summary
+(Key differentiators and overall winner by category)
+
+## Comparison Matrix
+| Aspect | ${entityList.join(' | ')} |
+|--------|${entityList.map(() => '-----').join('|')}|
+| [Aspect 1] | [Value] | [Value] | ... |
+| [Aspect 2] | [Value] | [Value] | ... |
+
+## Individual Profiles
+
+${entityList.map((e) => `### ${e}
+- **Overview:**
+- **Key Strengths:**
+- **Key Weaknesses:**
+- **Market Position:**
+- **Recent Developments:**
+`).join('\n')}
+
+## Head-to-Head Analysis
+(Direct comparison with supporting evidence)
+
+## Market Positioning Map
+(Describe how each entity positions in the market)
+
+## Recommendations
+(Which entity is best for different use cases)
+
+## Sources
+(All URLs consulted with dates)
+
+---
+
+Begin by researching the first entity: ${entityList[0]}`,
+            },
+          },
+        ],
+      };
+    }
+  );
+}
+
+// ── Literature Review ─────────────────────────────────────────────────────────
+
+/**
+ * Registers the literature-review prompt
+ */
+function registerLiteratureReview(server: McpServer): void {
+  server.prompt(
+    'literature-review',
+    {
+      topic: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('The research topic for literature review'),
+      yearFrom: z
+        .number()
+        .min(1900)
+        .max(2030)
+        .optional()
+        .describe('Start year for publications'),
+      sources: z
+        .number()
+        .min(3)
+        .max(10)
+        .default(5)
+        .describe('Number of academic sources to find'),
+    },
+    async ({ topic, yearFrom, sources = 5 }) => ({
+      messages: [
+        {
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: `Conduct an academic literature review on:
+
+**Topic:** ${topic}
+${yearFrom ? `**Year Range:** ${yearFrom} - present` : '**Year Range:** Recent publications'}
+**Target Sources:** ${sources} academic papers
+
+**Research Process:**
+1. Use \`academic_search\` with num_results=${sources}${yearFrom ? ` and year_from=${yearFrom}` : ''} to find relevant papers
+2. For each paper found, note:
+   - Full citation (use the provided APA/MLA/BibTeX)
+   - Key findings
+   - Methodology
+   - How it relates to the research question
+3. Identify themes, agreements, and disagreements across sources
+
+**Output Format:**
+
+## Abstract
+(150-200 word summary of the review)
+
+## Introduction
+(Context and importance of the topic, research questions)
+
+## Methodology
+(How sources were selected, databases searched, inclusion criteria)
+
+## Thematic Analysis
+
+### Theme 1: [Name]
+(Synthesis of findings across papers related to this theme)
+- Key findings from [Author1, Year]
+- Related findings from [Author2, Year]
+
+### Theme 2: [Name]
+(Continue for each major theme)
+
+## Summary of Key Papers
+| Paper | Authors | Year | Key Contribution | Methodology |
+|-------|---------|------|------------------|-------------|
+
+## Gaps in the Literature
+(What hasn't been studied, limitations of current research)
+
+## Conclusions
+(Synthesis of overall findings, implications)
+
+## Future Research Directions
+(Suggested areas for further investigation)
+
+## References
+(Full academic citations in APA format)
+
+---
+
+Begin by searching for academic papers on: ${topic}`,
+          },
+        },
+      ],
+    })
+  );
+}
+
+// ── Technical Deep Dive ───────────────────────────────────────────────────────
+
+/**
+ * Registers the technical-deep-dive prompt
+ */
+function registerTechnicalDeepDive(server: McpServer): void {
+  server.prompt(
+    'technical-deep-dive',
+    {
+      technology: z
+        .string()
+        .min(1)
+        .max(300)
+        .describe('The technology, framework, or concept to investigate'),
+      focusArea: z
+        .enum(['architecture', 'implementation', 'comparison', 'best-practices', 'troubleshooting'])
+        .default('implementation')
+        .describe('What aspect to focus on'),
+    },
+    async ({ technology, focusArea = 'implementation' }) => {
+      const focusInstructions: Record<string, string> = {
+        architecture: 'Focus on system design, components, data flow, and architectural patterns.',
+        implementation: 'Focus on how to implement, code examples, setup, and configuration.',
+        comparison: 'Focus on comparing with alternatives, trade-offs, and when to use what.',
+        'best-practices': 'Focus on recommended patterns, anti-patterns, and production considerations.',
+        troubleshooting: 'Focus on common issues, debugging techniques, and solutions.',
+      };
+
+      return {
+        messages: [
+          {
+            role: 'user' as const,
+            content: {
+              type: 'text' as const,
+              text: `Conduct a technical deep dive on:
+
+**Technology:** ${technology}
+**Focus Area:** ${focusArea}
+
+**Focus Instructions:** ${focusInstructions[focusArea]}
+
+**Research Process:**
+1. Use \`search_and_scrape\` with query "${technology} ${focusArea} guide" (num_results=5)
+2. Search for official documentation: "${technology} official documentation"
+3. Look for practical examples: "${technology} example tutorial"
+4. Find community discussions for real-world insights
+
+**Output Format:**
+
+## Overview
+(What is ${technology}, why it matters, when to use it)
+
+## ${focusArea === 'architecture' ? 'Architecture' : focusArea === 'comparison' ? 'Comparison' : 'Technical Details'}
+
+${focusArea === 'architecture' ? `### System Components
+(Diagram description or component list)
+
+### Data Flow
+(How data moves through the system)
+
+### Key Design Decisions
+(Trade-offs and why they were made)` : ''}
+
+${focusArea === 'implementation' ? `### Prerequisites
+- [List requirements]
+
+### Step-by-Step Guide
+1. [Step 1]
+2. [Step 2]
+...
+
+### Code Examples
+\`\`\`
+[Relevant code snippets]
+\`\`\`
+
+### Configuration
+[Key configuration options]` : ''}
+
+${focusArea === 'comparison' ? `### Alternatives
+| Feature | ${technology} | Alternative 1 | Alternative 2 |
+|---------|--------------|---------------|---------------|
+
+### When to Choose ${technology}
+(Use cases where it excels)
+
+### When to Choose Alternatives
+(Use cases where alternatives are better)` : ''}
+
+${focusArea === 'best-practices' ? `### Do's
+- [Best practice 1]
+- [Best practice 2]
+
+### Don'ts (Anti-patterns)
+- [Anti-pattern 1]
+- [Anti-pattern 2]
+
+### Production Considerations
+[Scaling, monitoring, security]` : ''}
+
+${focusArea === 'troubleshooting' ? `### Common Issues
+| Issue | Cause | Solution |
+|-------|-------|----------|
+
+### Debugging Techniques
+[How to debug effectively]
+
+### FAQ
+[Frequently encountered problems]` : ''}
+
+## Key Takeaways
+(3-5 most important points to remember)
+
+## Further Reading
+(Links to official docs, tutorials, related topics)
+
+## Sources
+(All URLs with access dates)
+
+---
+
+Begin researching: ${technology}`,
+            },
+          },
+        ],
+      };
+    }
+  );
+}
+
 // ── Prompt Descriptions (for testing and documentation) ─────────────────────
 
 /**
@@ -358,6 +751,26 @@ export const PROMPT_METADATA = {
     name: 'news-briefing',
     description: 'Get a current news summary on a topic',
     arguments: ['topic', 'timeRange'],
+  },
+  'patent-portfolio-analysis': {
+    name: 'patent-portfolio-analysis',
+    description: 'Analyze a company\'s patent portfolio including subsidiaries',
+    arguments: ['company', 'includeSubsidiaries'],
+  },
+  'competitive-analysis': {
+    name: 'competitive-analysis',
+    description: 'Compare multiple companies or products across key dimensions',
+    arguments: ['entities', 'aspects'],
+  },
+  'literature-review': {
+    name: 'literature-review',
+    description: 'Conduct an academic literature review with proper citations',
+    arguments: ['topic', 'yearFrom', 'sources'],
+  },
+  'technical-deep-dive': {
+    name: 'technical-deep-dive',
+    description: 'In-depth technical investigation of a technology or concept',
+    arguments: ['technology', 'focusArea'],
   },
 } as const;
 

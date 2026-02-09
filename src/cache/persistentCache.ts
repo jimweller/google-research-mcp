@@ -7,6 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { logger } from '../shared/logger.js';
 
 /**
  * Advanced cache implementation with disk persistence capabilities
@@ -82,7 +83,7 @@ export class PersistentCache extends Cache {
     // Initialize the cache asynchronously. Store the promise so callers
     // can await it instead of polling with setInterval.
     this.initPromise = this.initialize().catch(error => {
-      console.error('Error during cache initialization:', error);
+      logger.error('Error during cache initialization', { error: error instanceof Error ? error.message : String(error) });
     });
 
     // Register shutdown handlers unless caller manages shutdown itself
@@ -136,9 +137,9 @@ export class PersistentCache extends Cache {
           }
         } catch (loadError) {
           try {
-            console.error('Error loading entries from persistent storage:', loadError); // Keep error log
+            logger.error('Error loading entries from persistent storage', { error: loadError instanceof Error ? loadError.message : String(loadError) });
           } catch (_) {
-            // Ignore console errors during shutdown
+            // Ignore logger errors during shutdown
           }
           // Continue with empty cache even if loading fails
         }
@@ -151,9 +152,9 @@ export class PersistentCache extends Cache {
       this.isInitialized = true;
     } catch (error) {
       try {
-        console.error('Error initializing persistent cache:', error); // Keep actual error log
+        logger.error('Error initializing persistent cache', { error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
       // Continue with empty cache
       this.isInitialized = true;
@@ -219,15 +220,15 @@ export class PersistentCache extends Cache {
   }
 
   private sigintHandler = () => {
-    try { console.log('Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    try { logger.info('Persisting cache before exit (SIGINT)'); } catch (_) { /* ignore */ }
     this.attemptAsyncPersistThenExit(0);
   };
   private sigtermHandler = () => {
-    try { console.log('Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    try { logger.info('Persisting cache before exit (SIGTERM)'); } catch (_) { /* ignore */ }
     this.attemptAsyncPersistThenExit(0);
   };
   private sighupHandler = () => {
-    try { console.log('SIGHUP received. Persisting cache before exit...'); } catch (_) { /* ignore */ }
+    try { logger.info('Persisting cache before exit (SIGHUP)'); } catch (_) { /* ignore */ }
     this.attemptAsyncPersistThenExit(0);
   };
   private uncaughtExceptionHandler = (error: Error) => {
@@ -236,8 +237,7 @@ export class PersistentCache extends Cache {
       return;
     }
     try {
-      console.error('Uncaught exception:', error);
-      console.log('Persisting cache before exit...');
+      logger.error('Uncaught exception, persisting cache before exit', { error: error.message });
     } catch (_) { /* ignore */ }
     this.attemptAsyncPersistThenExit(1);
   };
@@ -411,9 +411,9 @@ export class PersistentCache extends Cache {
         await this.persistenceManager.saveEntry(namespace, hashedKey, entry); // Use hashedKey for persistence
       } catch (error) {
         try {
-          console.error(`Error persisting cache entry ${namespace}:${hashedKey}:`, error);
+          logger.error('Error persisting cache entry', { namespace, key: hashedKey, error: error instanceof Error ? error.message : String(error) });
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
       }
     }
@@ -458,7 +458,7 @@ export class PersistentCache extends Cache {
           // Skip expired entries
           if (persistedEntry.expiresAt <= this.now()) { // Use this.now()
              // Optionally remove expired entry from disk here
-             this.persistenceManager.removeEntry(namespace, hashedKey).catch(err => console.error("Failed to remove expired entry from disk", err));
+             this.persistenceManager.removeEntry(namespace, hashedKey).catch(err => logger.error("Failed to remove expired entry from disk", { namespace, key: hashedKey, error: err instanceof Error ? err.message : String(err) }));
              return undefined;
           }
 
@@ -474,9 +474,9 @@ export class PersistentCache extends Cache {
         }
       } catch (error) {
         try {
-          console.error(`Error loading cache entry ${namespace}:${hashedKey} from disk:`, error);
+          logger.error('Error loading cache entry from disk', { namespace, key: hashedKey, error: error instanceof Error ? error.message : String(error) });
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
       }
     }
@@ -486,9 +486,9 @@ export class PersistentCache extends Cache {
       this.persistenceManager.saveEntry(namespace, hashedKey, entry) // Use hashedKey
         .catch(error => {
           try {
-            console.error(`Error persisting cache entry ${namespace}:${hashedKey}:`, error);
+            logger.error('Error persisting cache entry on get', { namespace, key: hashedKey, error: error instanceof Error ? error.message : String(error) });
           } catch (_) {
-            // Ignore console errors during shutdown
+            // Ignore logger errors during shutdown
           }
         });
     }
@@ -613,9 +613,9 @@ export class PersistentCache extends Cache {
     } catch (error) {
       // Log but don't throw - this is a background operation
       try {
-        console.error(`Background revalidation failed for ${namespace}:`, error);
+        logger.error('Background revalidation failed', { namespace, error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
     }
   }
@@ -657,9 +657,9 @@ export class PersistentCache extends Cache {
       await this.persistenceManager.removeEntry(namespace, key); // Use hashed key
     } catch (error) {
       try {
-        console.error(`Error removing cache entry ${namespace}:${key} from disk:`, error);
+        logger.error('Error removing cache entry from disk', { namespace, key, error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
     }
   }
@@ -685,9 +685,9 @@ export class PersistentCache extends Cache {
     this.persistenceManager.clear()
       .catch(error => {
         try {
-          console.error('Error clearing persistent cache:', error);
+          logger.error('Error clearing persistent cache', { error: error instanceof Error ? error.message : String(error) });
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
       });
   }
@@ -717,9 +717,9 @@ export class PersistentCache extends Cache {
       await this.persistenceManager.saveAllEntries(this.namespaceCache);
     } catch (error) {
       try {
-        console.error('Error persisting cache to disk:', error);
+        logger.error('Error persisting cache to disk', { error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
       throw error;
     }
@@ -815,9 +815,9 @@ export class PersistentCache extends Cache {
       fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
     } catch (error) {
       try {
-        console.error('Error persisting cache synchronously:', error);
+        logger.error('Error persisting cache synchronously', { error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
     }
   }
@@ -867,9 +867,9 @@ export class PersistentCache extends Cache {
       }
     } catch (error) {
       try {
-        console.error('Error loading cache from disk:', error);
+        logger.error('Error loading cache from disk', { error: error instanceof Error ? error.message : String(error) });
       } catch (_) {
-        // Ignore console errors during shutdown
+        // Ignore logger errors during shutdown
       }
       throw error;
     }
@@ -885,7 +885,22 @@ export class PersistentCache extends Cache {
    *
    * @returns Extended statistics object
    */
-  getStats(): any {
+  getStats(): {
+    size: number;
+    pendingPromises: number;
+    metrics: {
+      hits: number;
+      misses: number;
+      errors: number;
+      evictions: number;
+      hitRatio: string;
+    };
+    persistence: {
+      isDirty: boolean;
+      namespaces: number;
+      persistedEntries: number;
+    };
+  } {
     // Get base stats
     const baseStats = super.getStats();
 
@@ -914,10 +929,10 @@ export class PersistentCache extends Cache {
   async dispose(): Promise<void> {
     try {
       if (process.env.NODE_ENV !== 'test') {
-        console.log('Disposing PersistentCache...');
+        logger.info('Disposing PersistentCache');
       }
     } catch (_) {
-      // Ignore console errors during shutdown
+      // Ignore logger errors during shutdown
     }
 
     // Stop the persistence timer first
@@ -942,28 +957,28 @@ export class PersistentCache extends Cache {
         
         try {
           if (process.env.NODE_ENV !== 'test') {
-            console.log('Cache persisted successfully during disposal.');
+            logger.info('Cache persisted successfully during disposal');
           }
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
       } catch (error) {
         try {
           if (process.env.NODE_ENV !== 'test') {
-            console.error('Error persisting cache during disposal:', error);
+            logger.error('Error persisting cache during disposal', { error: error instanceof Error ? error.message : String(error) });
           }
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
         // Don't re-throw in test environment to prevent hanging
       }
     } else {
        try {
           if (process.env.NODE_ENV !== 'test') {
-            console.log('No dirty entries to persist during disposal.');
+            logger.debug('No dirty entries to persist during disposal');
           }
         } catch (_) {
-          // Ignore console errors during shutdown
+          // Ignore logger errors during shutdown
         }
     }
 
@@ -985,10 +1000,10 @@ export class PersistentCache extends Cache {
 
     try {
       if (process.env.NODE_ENV !== 'test') {
-        console.log('PersistentCache disposed.');
+        logger.info('PersistentCache disposed');
       }
     } catch (_) {
-      // Ignore console errors during shutdown
+      // Ignore logger errors during shutdown
     }
   }
 
@@ -1029,15 +1044,15 @@ export class PersistentCache extends Cache {
             // Add persistence removal to promises
             removePromises.push(
                 this.persistenceManager.removeEntry(namespace, hashedKey).catch(error => {
-                    console.error(`Error removing evicted entry ${namespace}:${hashedKey} from disk:`, error);
+                    logger.error('Error removing evicted entry from disk', { namespace, key: hashedKey, error: error instanceof Error ? error.message : String(error) });
                     // Don't block other evictions if one fails
                 })
             );
         }
     }
 
-    if (actualEvictedCount > 0) { // Restore this log as it's not a debug log
-        console.log(`Evicted ${actualEvictedCount} LRU cache entries from memory`);
+    if (actualEvictedCount > 0) {
+        logger.debug('Evicted LRU cache entries from memory', { count: actualEvictedCount });
     }
 
     // Wait for all persistence removals to complete

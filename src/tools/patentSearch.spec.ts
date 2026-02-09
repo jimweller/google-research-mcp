@@ -6,6 +6,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import {
   handlePatentSearch,
   patentSearchInputSchema,
+  generateCompanyNameVariations,
   type PatentSearchInput,
 } from './patentSearch.js';
 
@@ -238,7 +239,7 @@ describe('patentSearch', () => {
       expect(capturedUrl).toContain('patent%2FUS');
     });
 
-    it('should build correct query for assignee filter', async () => {
+    it('should build query with assignee name variations', async () => {
       let capturedUrl = '';
       global.fetch = jest.fn((url: string | URL | Request) => {
         capturedUrl = String(url);
@@ -250,11 +251,13 @@ describe('patentSearch', () => {
 
       await handlePatentSearch({
         query: 'test',
-        assignee: 'Google LLC',
+        assignee: 'Rapt Media',
       });
 
-      expect(capturedUrl).toContain('assignee');
-      expect(capturedUrl).toContain('Google');
+      // Should include the company name as quoted search term
+      expect(capturedUrl).toContain('Rapt');
+      // Should also include variation without spaces
+      expect(capturedUrl).toContain('raptmedia');
     });
 
     it('should build correct query for year range', async () => {
@@ -373,6 +376,62 @@ describe('patentSearch', () => {
       const result = await handlePatentSearch({ query: '  test query  ' });
 
       expect(result.structuredContent.query).toBe('test query');
+    });
+  });
+
+  describe('generateCompanyNameVariations', () => {
+    it('should return empty array for empty input', () => {
+      expect(generateCompanyNameVariations('')).toEqual([]);
+      expect(generateCompanyNameVariations('   ')).toEqual([]);
+    });
+
+    it('should generate no-space variations', () => {
+      const variations = generateCompanyNameVariations('Rapt Media');
+
+      expect(variations).toContain('Rapt Media');
+      expect(variations).toContain('raptmedia');
+      expect(variations).toContain('RaptMedia');
+    });
+
+    it('should add Inc suffix variations', () => {
+      const variations = generateCompanyNameVariations('Rapt Media');
+
+      expect(variations).toContain('Rapt Media Inc');
+      expect(variations).toContain('Rapt Media, Inc.');
+    });
+
+    it('should handle names with existing suffixes', () => {
+      const variations = generateCompanyNameVariations('Google LLC');
+
+      // Should include original
+      expect(variations).toContain('Google LLC');
+      // Should include base name without suffix
+      expect(variations).toContain('Google');
+      // Should include no-space lowercase of base
+      expect(variations).toContain('google');
+    });
+
+    it('should handle names with Inc suffix', () => {
+      const variations = generateCompanyNameVariations('Flixmaster, Inc.');
+
+      expect(variations).toContain('Flixmaster, Inc.');
+      expect(variations).toContain('Flixmaster');
+      expect(variations).toContain('flixmaster');
+    });
+
+    it('should not duplicate entries', () => {
+      const variations = generateCompanyNameVariations('Apple');
+      const uniqueVariations = [...new Set(variations)];
+
+      expect(variations.length).toBe(uniqueVariations.length);
+    });
+
+    it('should handle single word company names', () => {
+      const variations = generateCompanyNameVariations('Kaltura');
+
+      expect(variations).toContain('Kaltura');
+      expect(variations).toContain('kaltura');
+      expect(variations).toContain('Kaltura Inc');
     });
   });
 });

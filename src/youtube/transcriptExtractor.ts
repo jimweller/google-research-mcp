@@ -96,35 +96,35 @@ export interface TranscriptResult {
  * Logger interface for structured logging
  */
 export interface Logger {
-  debug(message: string, meta?: any): void;
-  info(message: string, meta?: any): void;
-  warn(message: string, meta?: any): void;
-  error(message: string, meta?: any): void;
+  debug(message: string, meta?: Record<string, unknown>): void;
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
 }
 
 /**
  * Simple console logger implementation
  */
 export class ConsoleLogger implements Logger {
-  debug(message: string, meta?: any): void {
+  debug(message: string, meta?: Record<string, unknown>): void {
     if (process.env.YOUTUBE_TRANSCRIPT_DEBUG === 'true') {
       console.debug(`[YouTube Transcript Debug] ${message}`, meta || '');
     }
   }
 
-  info(message: string, meta?: any): void {
+  info(message: string, meta?: Record<string, unknown>): void {
     if (process.env.YOUTUBE_TRANSCRIPT_VERBOSE === 'true') {
       console.log(`[YouTube Transcript Info] ${message}`, meta ? JSON.stringify(meta) : '');
     }
   }
 
-  warn(message: string, meta?: any): void {
+  warn(message: string, meta?: Record<string, unknown>): void {
     if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
       console.warn(`[YouTube Transcript Warning] ${message}`, meta ? JSON.stringify(meta) : '');
     }
   }
 
-  error(message: string, meta?: any): void {
+  error(message: string, meta?: Record<string, unknown>): void {
     if (process.env.NODE_ENV !== 'test') {
       console.error(`[YouTube Transcript Error] ${message}`, meta ? JSON.stringify(meta) : '');
     }

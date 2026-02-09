@@ -15,7 +15,7 @@ import { CPC_SECTIONS, PATENT_OFFICE_PREFIXES, getTechnologyArea } from '../shar
 
 export const patentSearchInputSchema = {
   query: z.string().min(1).max(500)
-    .describe('Patent search query (keywords, patent number, inventor, assignee)'),
+    .describe('Patent search query (keywords, patent number, inventor, assignee). TIP: Try company name WITHOUT spaces (e.g., "raptmedia" instead of "Rapt Media") and try previous company names.'),
   num_results: z.number().min(1).max(10).default(5)
     .describe('Number of patents to return (1-10, default: 5)'),
   search_type: z.enum(['prior_art', 'specific', 'landscape']).default('prior_art')
@@ -23,11 +23,11 @@ export const patentSearchInputSchema = {
   patent_office: z.enum(['all', 'US', 'EP', 'WO', 'JP', 'CN', 'KR']).optional()
     .describe('Filter by patent office (US=USPTO, EP=EPO, WO=WIPO, JP=JPO, CN=CNIPA, KR=KIPO)'),
   assignee: z.string().max(200).optional()
-    .describe('Filter by assignee/company name'),
+    .describe('Company name to search for. Automatically tries variations (with/without spaces, Inc/Corp). For better results, also try previous company names in the query.'),
   inventor: z.string().max(200).optional()
-    .describe('Filter by inventor name'),
+    .describe('Inventor name to search for (exact phrase match)'),
   cpc_code: z.string().max(20).optional()
-    .describe('Filter by CPC classification code (e.g., G06F, H04L)'),
+    .describe('CPC classification code to search for (e.g., G06F, H04L)'),
   year_from: z.number().int().min(1900).max(2030).optional()
     .describe('Filter patents from this year onwards'),
   year_to: z.number().int().min(1900).max(2030).optional()
@@ -51,6 +51,54 @@ export type PatentSearchInput = {
 export { patentSearchOutputSchema } from '../schemas/outputSchemas.js';
 
 // ── Helper Functions ───────────────────────────────────────────────────────
+
+/**
+ * Generate company name variations for more comprehensive patent searches.
+ * Google Custom Search doesn't support structured `assignee:` filters,
+ * so we need to search for variations as plain text.
+ *
+ * @example
+ * generateCompanyNameVariations("Rapt Media")
+ * // Returns: ["Rapt Media", "raptmedia", "RaptMedia", "Rapt Media Inc", "Rapt Media, Inc."]
+ */
+export function generateCompanyNameVariations(companyName: string): string[] {
+  const name = companyName.trim();
+  if (!name) return [];
+
+  const variations = new Set<string>();
+
+  // Original name
+  variations.add(name);
+
+  // Remove spaces (e.g., "Rapt Media" → "raptmedia", "RaptMedia")
+  const noSpaces = name.replace(/\s+/g, '');
+  variations.add(noSpaces.toLowerCase());
+  variations.add(noSpaces);
+
+  // Common suffixes to add
+  const suffixes = ['Inc', 'Inc.', ', Inc.', ', Inc', 'LLC', 'Corp', 'Corporation'];
+
+  // If name doesn't already have a suffix, add common ones
+  const hasSuffix = /(?:Inc\.?|LLC|Corp(?:oration)?|Ltd\.?|GmbH|Co\.?)$/i.test(name);
+  if (!hasSuffix) {
+    variations.add(`${name} Inc`);
+    variations.add(`${name}, Inc.`);
+  }
+
+  // Remove common suffixes to get base name
+  const baseName = name
+    .replace(/[,\s]*(Inc\.?|LLC|Corp(?:oration)?|Ltd\.?|GmbH|Co\.?)$/i, '')
+    .trim();
+  if (baseName !== name) {
+    variations.add(baseName);
+    // Also add no-spaces version of base name
+    const baseNoSpaces = baseName.replace(/\s+/g, '');
+    variations.add(baseNoSpaces.toLowerCase());
+    variations.add(baseNoSpaces);
+  }
+
+  return Array.from(variations);
+}
 
 /**
  * Extract patent number from Google Patents URL
@@ -131,7 +179,14 @@ function extractAssigneeFromSnippet(snippet: string): string | undefined {
 }
 
 /**
- * Build Google Custom Search URL for patents
+ * Build Google Custom Search URL for patents.
+ *
+ * IMPORTANT: Google Custom Search API does NOT support structured operators like
+ * `assignee:`, `inventor:`, or `cpc:`. These are native Google Patents operators
+ * that only work on patents.google.com directly.
+ *
+ * Instead, we include company/inventor names as search terms. For assignees,
+ * we generate name variations to increase match likelihood.
  */
 function buildPatentSearchUrl(params: PatentSearchInput & { traceId?: string }): string {
   const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
@@ -141,29 +196,41 @@ function buildPatentSearchUrl(params: PatentSearchInput & { traceId?: string }):
     throw new Error('Missing Google API credentials');
   }
 
-  const queryParts: string[] = [params.query.trim()];
+  const queryParts: string[] = [];
+
+  // Add the main query
+  queryParts.push(params.query.trim());
 
   // Add site restriction to Google Patents
   queryParts.push('site:patents.google.com');
 
-  // Add patent office filter
+  // Add patent office filter (this works as it matches URL patterns)
   if (params.patent_office && params.patent_office !== 'all') {
     queryParts.push(`patent/${params.patent_office}`);
   }
 
-  // Add assignee filter
+  // Add assignee as search terms with variations
+  // Note: We use OR to match any variation, quoted for exact phrase matching
   if (params.assignee) {
-    queryParts.push(`assignee:"${params.assignee}"`);
+    const variations = generateCompanyNameVariations(params.assignee);
+    if (variations.length === 1) {
+      queryParts.push(`"${variations[0]}"`);
+    } else if (variations.length > 1) {
+      // Use OR to match any variation (limit to top 4 to avoid query length issues)
+      const topVariations = variations.slice(0, 4);
+      const orQuery = topVariations.map(v => `"${v}"`).join(' OR ');
+      queryParts.push(`(${orQuery})`);
+    }
   }
 
-  // Add inventor filter
+  // Add inventor name as search terms (quoted for exact match)
   if (params.inventor) {
-    queryParts.push(`inventor:"${params.inventor}"`);
+    queryParts.push(`"${params.inventor}"`);
   }
 
-  // Add CPC code filter
+  // Add CPC code as search term (appears in patent text)
   if (params.cpc_code) {
-    queryParts.push(`cpc:${params.cpc_code}`);
+    queryParts.push(`"${params.cpc_code}"`);
   }
 
   // Add year range filter

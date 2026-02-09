@@ -1,0 +1,65 @@
+# Google Researcher MCP Server - LLM Context
+
+> This file provides comprehensive context for AI assistants using this MCP server.
+
+## Quick Reference
+
+- **Primary Tool**: `search_and_scrape` - Use for most research tasks
+- **Documentation**: https://github.com/zoharbabin/google-research-mcp
+- **Full Context**: See llms-full.txt for detailed tool specifications
+
+## Tool Selection Guide
+
+| Task | Tool | Example |
+|------|------|---------|
+| Research any topic | `search_and_scrape` | `{"query": "climate change 2024", "num_results": 5}` |
+| Multi-step investigation | `sequential_search` | Track progress across 3+ searches |
+| Find academic papers | `academic_search` | Returns papers with APA/MLA/BibTeX citations |
+| Patent research | `patent_search` | Prior art, FTO analysis |
+| Company patent portfolio | `scrape_page` | Use `patents.google.com/?assignee=CompanyName` |
+| Recent news | `google_news_search` | With freshness filtering |
+| Images | `google_image_search` | Photos, diagrams, illustrations |
+| Specific URL content | `scrape_page` | Also handles YouTube transcripts, PDFs, DOCX |
+
+## Available Prompts
+
+Use `prompts/get` to retrieve these research workflow templates:
+
+1. **comprehensive-research** - Multi-source research with citations
+2. **fact-check** - Verify claims with authoritative sources
+3. **summarize-url** - Extract and summarize URL content
+4. **news-briefing** - Current news summary on a topic
+5. **patent-portfolio-analysis** - Analyze company patent holdings
+6. **competitive-analysis** - Compare multiple entities
+7. **literature-review** - Academic synthesis with citations
+8. **technical-deep-dive** - In-depth technical investigation
+
+## Output Quality Features
+
+- **Quality Scoring**: Sources ranked by relevance (35%), freshness (20%), authority (25%), content quality (20%)
+- **Citations**: All scraped content includes APA/MLA formatted citations
+- **Deduplication**: Combined content automatically removes duplicates
+- **Annotations**: Content tagged with audience, priority, timestamps
+
+## Key Behaviors
+
+- **Caching**: Results cached (30 min search, 1 hour scrape) - repeated queries are fast
+- **SPA Support**: Automatically uses browser rendering for JavaScript sites (Google Patents, etc.)
+- **Graceful Failures**: Partial results returned if some sources fail
+
+## Resources (via `resources/read`)
+
+| URI | Description |
+|-----|-------------|
+| `search://recent` | Last 20 search queries |
+| `search://session/current` | Active research session state |
+| `stats://cache` | Cache hit rates and performance |
+| `config://server` | Server capabilities and limits |
+
+## Best Practices for LLMs
+
+1. **Start with search_and_scrape** for most research - it's optimized
+2. **Use preview mode** on large pages before full fetch
+3. **Check cache** - repeated queries are free
+4. **Cite sources** - citations are provided in all responses
+5. **For patents**: Use `scrape_page` on `patents.google.com/?assignee=X` for comprehensive results

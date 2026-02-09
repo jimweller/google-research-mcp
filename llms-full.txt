@@ -1,0 +1,374 @@
+# Google Researcher MCP - Full LLM Context
+
+> Comprehensive reference for AI assistants using the Google Researcher MCP server.
+> This file contains everything needed to effectively use this MCP for research tasks.
+
+---
+
+## Server Overview
+
+The Google Researcher MCP server enables AI assistants to:
+- Search the web via Google Custom Search API
+- Read and extract content from any URL (including JavaScript-rendered pages)
+- Extract YouTube video transcripts
+- Parse documents (PDF, DOCX, PPTX)
+- Search academic papers with citations
+- Search patents for IP research
+- Track multi-step research workflows
+
+---
+
+## Tool Reference
+
+### search_and_scrape (RECOMMENDED)
+
+**Use this for most research tasks.** Combines search and content retrieval in one call.
+
+```json
+{
+  "name": "search_and_scrape",
+  "arguments": {
+    "query": "climate change effects 2024",
+    "num_results": 5,
+    "deduplicate": true
+  }
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| query | string | required | Search query (1-500 chars) |
+| num_results | number | 3 | Sources to fetch (1-10) |
+| deduplicate | boolean | true | Remove duplicate content |
+| include_sources | boolean | true | Append source URLs |
+| max_length_per_source | number | 50KB | Max chars per source |
+| total_max_length | number | 300KB | Max total chars |
+| filter_by_query | boolean | false | Only paragraphs with query terms |
+
+**Response includes:**
+- Combined content from all sources
+- Quality scores for each source
+- Citations (APA/MLA format)
+- Size metadata (estimatedTokens, truncated)
+
+---
+
+### scrape_page
+
+Extract content from a specific URL. Auto-detects content type.
+
+```json
+{
+  "name": "scrape_page",
+  "arguments": {
+    "url": "https://example.com/article",
+    "mode": "full"
+  }
+}
+```
+
+**Supported content types:**
+- Web pages (static HTML and JavaScript SPAs)
+- YouTube videos (extracts transcript)
+- PDF documents
+- DOCX documents
+- PPTX presentations
+
+**Special capabilities:**
+- Automatically uses browser rendering for JavaScript sites
+- Preview mode to check page size before full fetch
+- Citation extraction from page metadata
+
+**For Google Patents:**
+```json
+{
+  "name": "scrape_page",
+  "arguments": {
+    "url": "https://patents.google.com/?assignee=CompanyName"
+  }
+}
+```
+This returns the full patent list for a company - more comprehensive than patent_search.
+
+---
+
+### google_search
+
+Returns URLs only (not content). Use when you need to process pages yourself.
+
+```json
+{
+  "name": "google_search",
+  "arguments": {
+    "query": "TypeScript best practices",
+    "num_results": 5,
+    "time_range": "month",
+    "site_search": "github.com"
+  }
+}
+```
+
+---
+
+### google_news_search
+
+Search recent news with freshness filtering.
+
+```json
+{
+  "name": "google_news_search",
+  "arguments": {
+    "query": "AI regulations",
+    "freshness": "week",
+    "sort_by": "date",
+    "num_results": 5
+  }
+}
+```
+
+| freshness | Description |
+|-----------|-------------|
+| hour | Last 60 minutes |
+| day | Last 24 hours |
+| week | Last 7 days |
+| month | Last 30 days |
+| year | Last 365 days |
+
+---
+
+### google_image_search
+
+Find images with filtering options.
+
+```json
+{
+  "name": "google_image_search",
+  "arguments": {
+    "query": "architecture diagram microservices",
+    "type": "lineart",
+    "size": "large"
+  }
+}
+```
+
+| type | Description |
+|------|-------------|
+| photo | Photographs |
+| lineart | Diagrams, drawings |
+| clipart | Clip art |
+| face | Face images |
+| animated | GIFs |
+
+---
+
+### academic_search
+
+Search academic papers with citations.
+
+```json
+{
+  "name": "academic_search",
+  "arguments": {
+    "query": "transformer neural networks",
+    "num_results": 5,
+    "year_from": 2020,
+    "source": "arxiv"
+  }
+}
+```
+
+**Sources:** all, arxiv, pubmed, ieee, nature, springer
+
+**Returns:**
+- Paper titles, authors, abstracts
+- Pre-formatted citations (APA, MLA, BibTeX)
+- PDF links when available
+
+---
+
+### patent_search
+
+Search Google Patents via Custom Search API.
+
+```json
+{
+  "name": "patent_search",
+  "arguments": {
+    "query": "video streaming adaptive bitrate",
+    "search_type": "prior_art",
+    "num_results": 5
+  }
+}
+```
+
+**For comprehensive company patent research:** Use `scrape_page` on `patents.google.com/?assignee=CompanyName` instead - it returns more complete results.
+
+---
+
+### sequential_search
+
+Track multi-step research across multiple API calls.
+
+```json
+{
+  "name": "sequential_search",
+  "arguments": {
+    "searchStep": "Starting research on quantum computing",
+    "stepNumber": 1,
+    "totalStepsEstimate": 5,
+    "nextStepNeeded": true
+  }
+}
+```
+
+Use for complex investigations requiring 3+ searches with different angles.
+
+---
+
+## Prompts Reference
+
+### Basic Prompts
+
+#### comprehensive-research
+Multi-source research with synthesis and citations.
+```json
+{ "name": "comprehensive-research", "arguments": { "topic": "climate change solutions", "depth": "deep" } }
+```
+depth: quick (3 sources), standard (5), deep (8)
+
+#### fact-check
+Verify claims against authoritative sources.
+```json
+{ "name": "fact-check", "arguments": { "claim": "Coffee is the most traded commodity", "sources": 4 } }
+```
+
+#### summarize-url
+Summarize content from a URL.
+```json
+{ "name": "summarize-url", "arguments": { "url": "https://example.com", "format": "bullets" } }
+```
+format: brief, detailed, bullets
+
+#### news-briefing
+Current news summary on a topic.
+```json
+{ "name": "news-briefing", "arguments": { "topic": "AI regulations", "timeRange": "week" } }
+```
+
+### Advanced Prompts
+
+#### patent-portfolio-analysis
+Analyze company patent holdings including subsidiaries.
+```json
+{ "name": "patent-portfolio-analysis", "arguments": { "company": "Kaltura", "includeSubsidiaries": true } }
+```
+
+#### competitive-analysis
+Compare multiple companies/products.
+```json
+{ "name": "competitive-analysis", "arguments": { "entities": "React, Vue, Angular", "aspects": "performance, ecosystem" } }
+```
+
+#### literature-review
+Academic literature synthesis with proper citations.
+```json
+{ "name": "literature-review", "arguments": { "topic": "machine learning in healthcare", "yearFrom": 2020, "sources": 8 } }
+```
+
+#### technical-deep-dive
+In-depth technical investigation.
+```json
+{ "name": "technical-deep-dive", "arguments": { "technology": "WebAssembly", "focusArea": "architecture" } }
+```
+focusArea: architecture, implementation, comparison, best-practices, troubleshooting
+
+---
+
+## Resources (via resources/read)
+
+| URI | Description |
+|-----|-------------|
+| search://recent | Last 20 search queries with timestamps |
+| search://session/current | Active sequential search session state |
+| stats://cache | Cache hit rates and statistics |
+| stats://events | Event store statistics |
+| stats://resources | Resource cache statistics |
+| config://server | Server capabilities and configuration |
+
+---
+
+## Quality Scoring
+
+Sources from search_and_scrape are scored by:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Relevance | 35% | Query term matching |
+| Freshness | 20% | Publication recency |
+| Authority | 25% | Domain reputation (.gov, .edu, known sources) |
+| Content Quality | 20% | Length, structure, readability |
+
+---
+
+## Key Behaviors
+
+### Caching
+- Search results: 30 minutes
+- Scraped pages: 1 hour
+- Repeated queries are fast and don't count against API limits
+
+### SPA Rendering
+Automatically uses browser rendering for JavaScript-heavy sites:
+- patents.google.com
+- scholar.google.com
+- twitter.com / x.com
+- linkedin.com
+
+### Graceful Failures
+If some sources fail, you still get results from successful ones.
+
+### Citations
+All scraped content includes citation metadata in APA/MLA format.
+
+---
+
+## Best Practices
+
+1. **Start with search_and_scrape** for most research tasks
+2. **Use preview mode** before fetching large pages
+3. **For patents**: Use scrape_page on patents.google.com/?assignee=X
+4. **Cite sources**: Citations are automatically provided
+5. **Check quality scores**: Higher scores = more reliable sources
+6. **Use prompts** for structured research workflows
+
+---
+
+## Example Workflows
+
+### Research Workflow
+1. Use `comprehensive-research` prompt for topic overview
+2. Follow up with `academic_search` for peer-reviewed sources
+3. Use `scrape_page` on key URLs for full content
+
+### Patent Analysis Workflow
+1. Use `patent-portfolio-analysis` prompt
+2. Scrape patents.google.com/?assignee=CompanyName for full list
+3. Search for subsidiaries with search_and_scrape
+4. Compile comprehensive patent table
+
+### Competitive Analysis Workflow
+1. Use `competitive-analysis` prompt
+2. Follow up with `technical-deep-dive` for specific technologies
+3. Use `google_news_search` for recent developments
+
+---
+
+## Limits
+
+| Limit | Value |
+|-------|-------|
+| Max scrape content | 50 KB |
+| Max combined research | 300 KB |
+| Max document size | 10 MB |
+| Max search results | 10 per query |
+| Google API rate | 100 queries/day |

@@ -538,6 +538,8 @@ const recentSearches = await client.readResource({ uri: "search://recent" });
 
 Pre-built research workflow templates are available via the [MCP Prompts protocol](https://modelcontextprotocol.io/docs/specification/prompts). Use `prompts/list` to discover prompts and `prompts/get` to retrieve a prompt with arguments.
 
+### Basic Research Prompts
+
 | Prompt | Arguments | Description |
 |--------|-----------|-------------|
 | `comprehensive-research` | `topic`, `depth` (quick/standard/deep) | Multi-source research on a topic |
@@ -545,12 +547,37 @@ Pre-built research workflow templates are available via the [MCP Prompts protoco
 | `summarize-url` | `url`, `format` (brief/detailed/bullets) | Summarize content from a single URL |
 | `news-briefing` | `topic`, `timeRange` (day/week/month) | Get current news summary on a topic |
 
+### Advanced Research Prompts
+
+| Prompt | Arguments | Description |
+|--------|-----------|-------------|
+| `patent-portfolio-analysis` | `company`, `includeSubsidiaries` | Analyze a company's patent holdings |
+| `competitive-analysis` | `entities` (comma-separated), `aspects` | Compare companies/products |
+| `literature-review` | `topic`, `yearFrom`, `sources` | Academic literature synthesis |
+| `technical-deep-dive` | `technology`, `focusArea` | In-depth technical investigation |
+
+**Focus areas for `technical-deep-dive`:** `architecture`, `implementation`, `comparison`, `best-practices`, `troubleshooting`
+
 **Example** (using MCP SDK):
 ```javascript
 const prompts = await client.listPrompts();
+
+// Basic research
 const research = await client.getPrompt({
   name: "comprehensive-research",
   arguments: { topic: "quantum computing", depth: "standard" }
+});
+
+// Advanced: Patent analysis
+const patents = await client.getPrompt({
+  name: "patent-portfolio-analysis",
+  arguments: { company: "Kaltura", includeSubsidiaries: true }
+});
+
+// Advanced: Competitive analysis
+const comparison = await client.getPrompt({
+  name: "competitive-analysis",
+  arguments: { entities: "React, Vue, Angular", aspects: "performance, learning curve, ecosystem" }
 });
 ```
 

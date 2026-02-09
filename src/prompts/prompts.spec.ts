@@ -85,11 +85,17 @@ describe('MCP Prompts', () => {
 
   describe('PROMPT_NAMES', () => {
     it('contains all prompt names', () => {
-      expect(PROMPT_NAMES).toHaveLength(4);
+      expect(PROMPT_NAMES).toHaveLength(8);
+      // Basic prompts
       expect(PROMPT_NAMES).toContain('comprehensive-research');
       expect(PROMPT_NAMES).toContain('fact-check');
       expect(PROMPT_NAMES).toContain('summarize-url');
       expect(PROMPT_NAMES).toContain('news-briefing');
+      // Advanced prompts
+      expect(PROMPT_NAMES).toContain('patent-portfolio-analysis');
+      expect(PROMPT_NAMES).toContain('competitive-analysis');
+      expect(PROMPT_NAMES).toContain('literature-review');
+      expect(PROMPT_NAMES).toContain('technical-deep-dive');
     });
 
     it('matches keys in PROMPT_METADATA', () => {
