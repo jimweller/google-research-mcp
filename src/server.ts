@@ -76,16 +76,6 @@ import {
 import { registerResources, trackSearch, type RecentSearch } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 import {
-  handlePatentAssigneeSearch,
-  patentAssigneeSearchInputSchema,
-  type PatentAssigneeSearchInput,
-} from "./tools/patentAssigneeSearch.js";
-import {
-  handlePatentDetails,
-  patentDetailsInputSchema,
-  type PatentDetailsInput,
-} from "./tools/patentDetails.js";
-import {
   type GoogleSearchResponse,
   type GoogleImageSearchResponse,
   type GoogleNewsSearchResponse,
@@ -1861,104 +1851,6 @@ function configureToolsAndResources(
                 traceId,
                 tool: 'google_search', // Use existing type
             });
-
-            return result;
-        }
-    );
-
-    // ── Patent Assignee Search Tool ────────────────────────────────────────────
-    // Search all patents for a specific company/assignee using PatentsView API
-    server.registerTool(
-        "patent_assignee_search",
-        {
-            title: "Patent Assignee Search",
-            description: `Search all patents for a specific company/assignee using PatentsView API.
-
-**When to use:**
-- Building patent portfolios for companies
-- Tracking competitor patent activity
-- Due diligence and M&A research
-- Identifying key inventors at a company
-
-**Features:**
-- Full pagination support (up to 100 results per page)
-- Patent status calculation (active/expired)
-- Technology distribution by CPC codes
-- Summary aggregations by status, type, and year
-
-**Requirements:**
-- PATENTSVIEW_API_KEY environment variable (free: https://patentsview.org/apis/keyrequest)
-- Rate limit: 45 requests/minute
-
-**Tip:** For comprehensive portfolio analysis, use with the patent-portfolio-analysis prompt.`,
-            inputSchema: patentAssigneeSearchInputSchema,
-            annotations: {
-                title: "Patent Assignee Search",
-                readOnlyHint: true,
-                openWorldHint: true,
-            },
-        },
-        async (params) => {
-            const traceId = randomUUID();
-            logger.info('patent_assignee_search invoked', { traceId, assignee: params.assignee });
-
-            const result = await handlePatentAssigneeSearch(params as PatentAssigneeSearchInput, traceId);
-
-            // Track the search
-            trackSearch({
-                query: params.assignee,
-                timestamp: new Date().toISOString(),
-                resultCount: result.structuredContent.patents?.length || 0,
-                traceId,
-                tool: 'google_search', // Use existing type
-            });
-
-            return result;
-        }
-    );
-
-    // ── Patent Details Tool ────────────────────────────────────────────────────
-    // Get comprehensive details for a specific patent
-    server.registerTool(
-        "patent_details",
-        {
-            title: "Patent Details",
-            description: `Get comprehensive details for a specific patent including status, citations, and claims.
-
-**When to use:**
-- Deep-dive into specific patents of interest
-- Citation analysis (who cites this patent, what it cites)
-- Understanding patent claims and scope
-- Checking patent status (active/expired)
-
-**Features:**
-- Full patent metadata (title, abstract, dates)
-- Assignee and inventor details with locations
-- CPC classification codes with descriptions
-- Citation data (forward and backward citations)
-- Claims text (independent and dependent)
-- Calculated expiration date and status
-
-**Requirements:**
-- PATENTSVIEW_API_KEY environment variable (free: https://patentsview.org/apis/keyrequest)
-- Rate limit: 45 requests/minute
-
-**Patent number formats:**
-- Plain number: "11886826"
-- With country prefix: "US11886826"
-- With kind code: "US11886826B1"`,
-            inputSchema: patentDetailsInputSchema,
-            annotations: {
-                title: "Patent Details",
-                readOnlyHint: true,
-                openWorldHint: true,
-            },
-        },
-        async (params) => {
-            const traceId = randomUUID();
-            logger.info('patent_details invoked', { traceId, patentId: params.patent_id });
-
-            const result = await handlePatentDetails(params as PatentDetailsInput, traceId);
 
             return result;
         }

@@ -85,12 +85,11 @@ describe('MCP Prompts', () => {
 
   describe('PROMPT_NAMES', () => {
     it('contains all prompt names', () => {
-      expect(PROMPT_NAMES).toHaveLength(5);
+      expect(PROMPT_NAMES).toHaveLength(4);
       expect(PROMPT_NAMES).toContain('comprehensive-research');
       expect(PROMPT_NAMES).toContain('fact-check');
       expect(PROMPT_NAMES).toContain('summarize-url');
       expect(PROMPT_NAMES).toContain('news-briefing');
-      expect(PROMPT_NAMES).toContain('patent-portfolio-analysis');
     });
 
     it('matches keys in PROMPT_METADATA', () => {
