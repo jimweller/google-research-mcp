@@ -192,8 +192,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       category: 'search',
       tier: 'core',
       cacheTTL: 86400, // 24 hours (papers don't change)
-      rateLimit: '100/5min (Semantic Scholar)',
-      externalAPIs: ['Semantic Scholar API'],
+      rateLimit: '100/day (Google API)',
+      externalAPIs: ['Google Custom Search API'],
     },
   },
 

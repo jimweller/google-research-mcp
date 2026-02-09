@@ -342,13 +342,12 @@ export const academicPaperSchema = z.object({
   authors: z.array(z.string()).describe('List of author names'),
   year: z.number().int().optional().describe('Publication year'),
   venue: z.string().optional().describe('Journal or conference name'),
-  abstract: z.string().optional().describe('Paper abstract'),
-  citationCount: z.number().int().optional().describe('Number of citations'),
-  url: z.string().url().optional().describe('URL to paper page'),
+  abstract: z.string().optional().describe('Paper abstract or description'),
+  url: z.string().url().describe('URL to paper page'),
   pdfUrl: z.string().url().optional().describe('Direct URL to PDF'),
   doi: z.string().optional().describe('Digital Object Identifier'),
   arxivId: z.string().optional().describe('arXiv identifier'),
-  fieldsOfStudy: z.array(z.string()).optional().describe('Research fields'),
+  source: z.string().describe('Academic source domain'),
   citations: academicCitationsSchema.describe('Pre-formatted citations'),
 });
 
@@ -365,7 +364,7 @@ export const academicSearchOutputSchema = {
   /** Number of results returned */
   resultCount: z.number().int().describe('Number of papers returned'),
   /** Data source */
-  source: z.literal('Semantic Scholar').describe('Data source'),
+  source: z.literal('Google Scholar Search').describe('Data source'),
 };
 
 /** Inferred type for academic paper */
@@ -377,5 +376,5 @@ export type AcademicSearchOutput = {
   query: string;
   totalResults: number;
   resultCount: number;
-  source: 'Semantic Scholar';
+  source: 'Google Scholar Search';
 };

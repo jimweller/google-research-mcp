@@ -1568,7 +1568,7 @@ Ideal for current events, breaking news, and time-sensitive topics.
         "academic_search",
         {
             title: "Academic Paper Search",
-            description: `Search academic papers using Semantic Scholar API.
+            description: `Search academic papers using Google Custom Search API.
 
 **Best for:**
 - Finding peer-reviewed, authoritative sources
@@ -1578,13 +1578,13 @@ Ideal for current events, breaking news, and time-sensitive topics.
 
 **Features:**
 - Paper titles, authors, abstracts
-- Citation counts and publication years
+- Publication years and venues
 - Direct PDF links (when available)
 - Pre-formatted citations (APA, MLA, BibTeX)
 
-**Free Tier:** 100 requests per 5 minutes, no API key required.
+**Academic Sources:** arXiv, PubMed, IEEE, Nature, Springer, ResearchGate, JSTOR, and more.
 
-**Note:** Papers don't change, so results are cached for 24 hours.`,
+**Note:** Uses same Google API credentials as other search tools.`,
             inputSchema: academicSearchInputSchema,
             outputSchema: acadSearchSchema,
             annotations: {

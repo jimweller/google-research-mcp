@@ -91,7 +91,6 @@ graph TD
         M[Google Search API]
         N[Web Pages]
         P[YouTube Transcript API]
-        SS[Semantic Scholar API]
     end
 
     A -- Connects via --> B
@@ -123,8 +122,8 @@ graph TD
     G -- Calls --> N
     IMG -- Calls --> M
     NEWS -- Calls --> M
+    ACAD -- Calls --> M
     YT -- Calls --> P
-    ACAD -- Calls --> SS
 
     I -- Uses --> F
     I -- Uses --> G

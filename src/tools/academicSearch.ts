@@ -1,98 +1,54 @@
 /**
  * Academic Paper Search Tool
  *
- * Searches academic papers using the Semantic Scholar API.
- * Free tier: 100 requests per 5 minutes, no API key required for basic usage.
+ * Searches academic papers using Google Custom Search API with
+ * site filters for academic sources (arXiv, PubMed, IEEE, etc.).
+ *
+ * Uses the same Google API credentials as other search tools.
  *
  * Returns:
  * - Paper titles, authors, abstracts
- * - Citation counts and publication years
+ * - Publication years and venues
  * - PDF URLs (when available)
  * - Pre-formatted citations (APA, MLA, BibTeX)
  */
 
 import { z } from 'zod';
-import { getErrorMessage } from '../types/googleApi.js';
+import { getErrorMessage, GoogleSearchResponse, GoogleSearchItem } from '../types/googleApi.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Semantic Scholar API base URL */
-const SEMANTIC_SCHOLAR_API = 'https://api.semanticscholar.org/graph/v1';
+/** Google Custom Search API base URL */
+const GOOGLE_SEARCH_API = 'https://www.googleapis.com/customsearch/v1';
 
 /** Request timeout in milliseconds */
 const API_TIMEOUT_MS = 15_000;
 
-/** Fields to request from Semantic Scholar */
-const PAPER_FIELDS = [
-  'title',
-  'authors',
-  'abstract',
-  'year',
-  'citationCount',
-  'url',
-  'venue',
-  'publicationDate',
-  'openAccessPdf',
-  'externalIds',
-  'fieldsOfStudy',
-].join(',');
+/** Academic source domains for site filtering */
+const ACADEMIC_SITES = [
+  'arxiv.org',
+  'pubmed.ncbi.nlm.nih.gov',
+  'scholar.google.com',
+  'ieee.org',
+  'acm.org',
+  'nature.com',
+  'sciencedirect.com',
+  'springer.com',
+  'researchgate.net',
+  'semanticscholar.org',
+  'biorxiv.org',
+  'medrxiv.org',
+  'plos.org',
+  'frontiersin.org',
+  'mdpi.com',
+  'wiley.com',
+  'tandfonline.com',
+  'sagepub.com',
+  'jstor.org',
+  'ncbi.nlm.nih.gov',
+];
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-/**
- * Author information from Semantic Scholar
- */
-export interface PaperAuthor {
-  authorId: string;
-  name: string;
-}
-
-/**
- * External IDs for a paper
- */
-export interface ExternalIds {
-  DOI?: string;
-  ArXiv?: string;
-  PubMed?: string;
-  MAG?: string;
-  CorpusId?: number;
-}
-
-/**
- * Open access PDF information
- */
-export interface OpenAccessPdf {
-  url: string;
-  status?: string;
-}
-
-/**
- * Raw paper data from Semantic Scholar API
- */
-export interface SemanticScholarPaper {
-  paperId: string;
-  title: string;
-  authors?: PaperAuthor[];
-  abstract?: string;
-  year?: number;
-  citationCount?: number;
-  url?: string;
-  venue?: string;
-  publicationDate?: string;
-  openAccessPdf?: OpenAccessPdf;
-  externalIds?: ExternalIds;
-  fieldsOfStudy?: string[];
-}
-
-/**
- * Semantic Scholar search response
- */
-export interface SemanticScholarSearchResponse {
-  total: number;
-  offset: number;
-  next?: number;
-  data: SemanticScholarPaper[];
-}
 
 /**
  * Formatted citations for a paper
@@ -112,12 +68,11 @@ export interface AcademicPaperResult {
   year?: number;
   venue?: string;
   abstract?: string;
-  citationCount?: number;
-  url?: string;
+  url: string;
   pdfUrl?: string;
   doi?: string;
   arxivId?: string;
-  fieldsOfStudy?: string[];
+  source: string;
   citations: FormattedCitations;
 }
 
@@ -143,17 +98,17 @@ export const academicSearchInputSchema = {
   year_to: z.number().int().min(1900).max(2030).optional()
     .describe('Only include papers published in or before this year'),
 
-  /** Filter by field of study */
-  fields_of_study: z.array(z.string()).max(5).optional()
-    .describe('Filter by fields (e.g., ["Computer Science", "Medicine"])'),
+  /** Specific academic source to search */
+  source: z.enum(['all', 'arxiv', 'pubmed', 'ieee', 'nature', 'springer']).default('all')
+    .describe('Limit search to specific academic source (default: all sources)'),
 
-  /** Only return papers with open access PDF */
-  open_access_only: z.boolean().default(false)
-    .describe('Only return papers with freely available PDFs'),
+  /** Search for PDFs only */
+  pdf_only: z.boolean().default(false)
+    .describe('Only return results with PDF links'),
 
   /** Sort order */
-  sort_by: z.enum(['relevance', 'citations', 'date']).default('relevance')
-    .describe('Sort by relevance, citation count, or publication date'),
+  sort_by: z.enum(['relevance', 'date']).default('relevance')
+    .describe('Sort by relevance or publication date (most recent first)'),
 };
 
 // ── Output Schema ────────────────────────────────────────────────────────────
@@ -168,13 +123,12 @@ export const academicSearchOutputSchema = {
     authors: z.array(z.string()).describe('List of author names'),
     year: z.number().int().optional().describe('Publication year'),
     venue: z.string().optional().describe('Journal or conference name'),
-    abstract: z.string().optional().describe('Paper abstract'),
-    citationCount: z.number().int().optional().describe('Number of citations'),
-    url: z.string().url().optional().describe('URL to paper page'),
+    abstract: z.string().optional().describe('Paper abstract or description'),
+    url: z.string().url().describe('URL to paper page'),
     pdfUrl: z.string().url().optional().describe('Direct URL to PDF'),
     doi: z.string().optional().describe('Digital Object Identifier'),
     arxivId: z.string().optional().describe('arXiv identifier'),
-    fieldsOfStudy: z.array(z.string()).optional().describe('Research fields'),
+    source: z.string().describe('Academic source domain'),
     citations: z.object({
       apa: z.string().describe('APA 7th edition format'),
       mla: z.string().describe('MLA 9th edition format'),
@@ -192,7 +146,7 @@ export const academicSearchOutputSchema = {
   resultCount: z.number().int().describe('Number of papers returned'),
 
   /** Data source */
-  source: z.literal('Semantic Scholar').describe('Data source'),
+  source: z.literal('Google Scholar Search').describe('Data source'),
 };
 
 // ── Output Type ──────────────────────────────────────────────────────────────
@@ -202,8 +156,212 @@ export interface AcademicSearchOutput {
   query: string;
   totalResults: number;
   resultCount: number;
-  source: 'Semantic Scholar';
+  source: 'Google Scholar Search';
   [key: string]: unknown; // Index signature for MCP SDK compatibility
+}
+
+// ── Metadata Extraction ──────────────────────────────────────────────────────
+
+/**
+ * Extracts authors from Google search result snippet or title
+ */
+function extractAuthors(item: GoogleSearchItem): string[] {
+  const authors: string[] = [];
+
+  // Try pagemap metatags for author info
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags) {
+    const authorMeta = metatags['citation_author'] ||
+                       metatags['author'] ||
+                       metatags['dc.creator'];
+    if (authorMeta) {
+      // Handle comma or semicolon separated authors
+      return authorMeta.split(/[,;]/).map((a: string) => a.trim()).filter(Boolean);
+    }
+  }
+
+  // Try to extract from snippet patterns like "by Author Name - 2023"
+  const snippet = item.snippet || '';
+  const byMatch = snippet.match(/^by\s+([^-–—]+?)(?:\s*[-–—]|$)/i);
+  if (byMatch) {
+    const authorStr = byMatch[1].trim();
+    // Split on common separators
+    const authorList = authorStr.split(/,\s*(?:and\s+)?|\s+and\s+/i);
+    authors.push(...authorList.map(a => a.trim()).filter(a => a && a.length < 50));
+  }
+
+  // Try title pattern for arXiv-style "[Author et al.]"
+  const etAlMatch = item.title.match(/\[([^\]]+(?:et al\.?)?)\]/i);
+  if (etAlMatch) {
+    authors.push(etAlMatch[1].trim());
+  }
+
+  return authors.length > 0 ? authors : ['Unknown Author'];
+}
+
+/**
+ * Extracts publication year from Google search result
+ */
+function extractYear(item: GoogleSearchItem): number | undefined {
+  // Try pagemap metatags
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags) {
+    const dateMeta = metatags['citation_publication_date'] ||
+                     metatags['citation_date'] ||
+                     metatags['dc.date'] ||
+                     metatags['article:published_time'];
+    if (dateMeta) {
+      const yearMatch = dateMeta.match(/(\d{4})/);
+      if (yearMatch) return parseInt(yearMatch[1], 10);
+    }
+  }
+
+  // Try snippet for year patterns
+  const snippet = item.snippet || '';
+  const yearMatch = snippet.match(/\b(19|20)\d{2}\b/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[0], 10);
+    if (year >= 1900 && year <= new Date().getFullYear() + 1) {
+      return year;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extracts venue/journal from Google search result
+ */
+function extractVenue(item: GoogleSearchItem): string | undefined {
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags) {
+    return metatags['citation_journal_title'] ||
+           metatags['og:site_name'] ||
+           metatags['dc.publisher'];
+  }
+
+  // Use display link as fallback venue
+  const domain = item.displayLink.replace(/^www\./, '');
+  const siteName = domain.split('.')[0];
+
+  // Map domain to friendly venue names
+  const venueMap: Record<string, string> = {
+    'arxiv': 'arXiv',
+    'pubmed': 'PubMed',
+    'ieee': 'IEEE',
+    'acm': 'ACM Digital Library',
+    'nature': 'Nature',
+    'sciencedirect': 'ScienceDirect',
+    'springer': 'Springer',
+    'researchgate': 'ResearchGate',
+    'biorxiv': 'bioRxiv',
+    'medrxiv': 'medRxiv',
+    'plos': 'PLOS',
+    'frontiersin': 'Frontiers',
+    'mdpi': 'MDPI',
+    'wiley': 'Wiley',
+    'jstor': 'JSTOR',
+    'ncbi': 'NCBI',
+  };
+
+  return venueMap[siteName.toLowerCase()] || siteName.charAt(0).toUpperCase() + siteName.slice(1);
+}
+
+/**
+ * Extracts DOI from Google search result
+ */
+function extractDOI(item: GoogleSearchItem): string | undefined {
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags) {
+    const doi = metatags['citation_doi'] || metatags['dc.identifier'];
+    if (doi && doi.includes('10.')) {
+      // Clean DOI format
+      const doiMatch = doi.match(/10\.\d{4,}\/[^\s]+/);
+      return doiMatch ? doiMatch[0] : undefined;
+    }
+  }
+
+  // Try to extract from URL
+  const doiUrlMatch = item.link.match(/doi\.org\/(10\.\d{4,}\/[^\s?#]+)/);
+  if (doiUrlMatch) return doiUrlMatch[1];
+
+  return undefined;
+}
+
+/**
+ * Extracts arXiv ID from URL or metadata
+ */
+function extractArxivId(item: GoogleSearchItem): string | undefined {
+  // Try URL pattern
+  const arxivMatch = item.link.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+  if (arxivMatch) return arxivMatch[1];
+
+  // Try pagemap
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags?.['citation_arxiv_id']) {
+    return metatags['citation_arxiv_id'];
+  }
+
+  return undefined;
+}
+
+/**
+ * Validates that a string is a valid URL
+ */
+function isValidUrl(str: string): boolean {
+  try {
+    new URL(str);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extracts PDF URL from Google search result
+ */
+function extractPdfUrl(item: GoogleSearchItem): string | undefined {
+  // Direct PDF links
+  if (item.link.endsWith('.pdf') && isValidUrl(item.link)) {
+    return item.link;
+  }
+
+  // arXiv PDF conversion
+  if (item.link.includes('arxiv.org/abs/')) {
+    const pdfUrl = item.link.replace('/abs/', '/pdf/') + '.pdf';
+    if (isValidUrl(pdfUrl)) return pdfUrl;
+  }
+
+  // Try pagemap for PDF link
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags?.['citation_pdf_url']) {
+    const pdfUrl = metatags['citation_pdf_url'];
+    if (isValidUrl(pdfUrl)) return pdfUrl;
+  }
+
+  return undefined;
+}
+
+/**
+ * Gets abstract/description from search result
+ */
+function extractAbstract(item: GoogleSearchItem): string | undefined {
+  const metatags = item.pagemap?.metatags?.[0];
+  if (metatags) {
+    const description = metatags['og:description'] ||
+                        metatags['description'] ||
+                        metatags['dc.description'];
+    if (description && description.length > 50) {
+      return description;
+    }
+  }
+
+  // Use snippet as fallback
+  if (item.snippet && item.snippet.length > 50) {
+    return item.snippet;
+  }
+
+  return undefined;
 }
 
 // ── Citation Formatting ──────────────────────────────────────────────────────
@@ -212,7 +370,9 @@ export interface AcademicSearchOutput {
  * Formats author names for APA style (Last, F. M.)
  */
 function formatAuthorsAPA(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown Author';
+  if (authors.length === 0 || (authors.length === 1 && authors[0] === 'Unknown Author')) {
+    return 'Unknown Author';
+  }
   if (authors.length === 1) return formatSingleAuthorAPA(authors[0]);
   if (authors.length === 2) {
     return `${formatSingleAuthorAPA(authors[0])} & ${formatSingleAuthorAPA(authors[1])}`;
@@ -225,7 +385,7 @@ function formatSingleAuthorAPA(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0];
   const lastName = parts[parts.length - 1];
-  const initials = parts.slice(0, -1).map(p => p[0].toUpperCase() + '.').join(' ');
+  const initials = parts.slice(0, -1).map(p => p[0]?.toUpperCase() + '.').join(' ');
   return `${lastName}, ${initials}`;
 }
 
@@ -233,7 +393,9 @@ function formatSingleAuthorAPA(name: string): string {
  * Formats author names for MLA style (Last, First)
  */
 function formatAuthorsMLA(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown Author';
+  if (authors.length === 0 || (authors.length === 1 && authors[0] === 'Unknown Author')) {
+    return 'Unknown Author';
+  }
   if (authors.length === 1) return formatSingleAuthorMLA(authors[0]);
   if (authors.length === 2) {
     return `${formatSingleAuthorMLA(authors[0])}, and ${authors[1]}`;
@@ -254,39 +416,47 @@ function formatSingleAuthorMLA(name: string): string {
  * Formats authors for BibTeX
  */
 function formatAuthorsBibTeX(authors: string[]): string {
-  return authors.join(' and ') || 'Unknown Author';
+  if (authors.length === 0 || (authors.length === 1 && authors[0] === 'Unknown Author')) {
+    return 'Unknown Author';
+  }
+  return authors.join(' and ');
 }
 
 /**
  * Creates a BibTeX key from title and year
  */
 function createBibTeXKey(title: string, year?: number): string {
-  const firstWord = title.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+  const firstWord = title.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, '') || 'unknown';
   return `${firstWord}${year || 'unknown'}`;
 }
 
 /**
  * Generates formatted citations for a paper
  */
-function generateCitations(paper: SemanticScholarPaper): FormattedCitations {
-  const authors = paper.authors?.map(a => a.name) || [];
-  const year = paper.year;
-  const title = paper.title;
-  const venue = paper.venue || 'Unknown Venue';
-  const doi = paper.externalIds?.DOI;
+function generateCitations(paper: {
+  title: string;
+  authors: string[];
+  year?: number;
+  venue?: string;
+  doi?: string;
+  url: string;
+}): FormattedCitations {
+  const { authors, year, title, venue, doi, url } = paper;
 
   // APA 7th Edition
   let apa = `${formatAuthorsAPA(authors)} (${year || 'n.d.'}). ${title}. `;
-  if (venue !== 'Unknown Venue') {
+  if (venue) {
     apa += `*${venue}*. `;
   }
   if (doi) {
     apa += `https://doi.org/${doi}`;
+  } else {
+    apa += url;
   }
 
   // MLA 9th Edition
   let mla = `${formatAuthorsMLA(authors)}. "${title}." `;
-  if (venue !== 'Unknown Venue') {
+  if (venue) {
     mla += `*${venue}*, `;
   }
   if (year) {
@@ -303,8 +473,9 @@ function generateCitations(paper: SemanticScholarPaper): FormattedCitations {
   bibtex += `  title = {${title}},\n`;
   bibtex += `  author = {${formatAuthorsBibTeX(authors)}},\n`;
   if (year) bibtex += `  year = {${year}},\n`;
-  if (venue !== 'Unknown Venue') bibtex += `  journal = {${venue}},\n`;
+  if (venue) bibtex += `  journal = {${venue}},\n`;
   if (doi) bibtex += `  doi = {${doi}},\n`;
+  bibtex += `  url = {${url}},\n`;
   bibtex += `}`;
 
   return { apa, mla, bibtex };
@@ -320,9 +491,9 @@ export type AcademicSearchInput = {
   num_results?: number;
   year_from?: number;
   year_to?: number;
-  fields_of_study?: string[];
-  open_access_only?: boolean;
-  sort_by?: 'relevance' | 'citations' | 'date';
+  source?: 'all' | 'arxiv' | 'pubmed' | 'ieee' | 'nature' | 'springer';
+  pdf_only?: boolean;
+  sort_by?: 'relevance' | 'date';
 };
 
 /**
@@ -338,32 +509,80 @@ export async function handleAcademicSearch(input: AcademicSearchInput): Promise<
     num_results = 5,
     year_from,
     year_to,
-    fields_of_study,
-    open_access_only = false,
+    source = 'all',
+    pdf_only = false,
     sort_by = 'relevance',
   } = input;
 
+  // Check for required environment variables
+  const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
+  const searchId = process.env.GOOGLE_CUSTOM_SEARCH_ID;
+
+  if (!apiKey || !searchId) {
+    return {
+      content: [{ type: 'text', text: 'Academic search failed: Missing Google API credentials (GOOGLE_CUSTOM_SEARCH_API_KEY or GOOGLE_CUSTOM_SEARCH_ID)' }],
+      structuredContent: {
+        papers: [],
+        query: query.trim(),
+        totalResults: 0,
+        resultCount: 0,
+        source: 'Google Scholar Search',
+      },
+      isError: true,
+    };
+  }
+
   try {
-    // Build search URL
+    // Build search query with site filters
+    let searchQuery = query.trim();
+
+    // Add site filter based on source selection
+    const siteFilters: Record<string, string> = {
+      'arxiv': 'site:arxiv.org',
+      'pubmed': 'site:pubmed.ncbi.nlm.nih.gov OR site:ncbi.nlm.nih.gov',
+      'ieee': 'site:ieee.org OR site:ieeexplore.ieee.org',
+      'nature': 'site:nature.com',
+      'springer': 'site:springer.com OR site:link.springer.com',
+    };
+
+    if (source !== 'all' && siteFilters[source]) {
+      searchQuery = `${searchQuery} ${siteFilters[source]}`;
+    } else if (source === 'all') {
+      // Search across all academic sites
+      const siteQuery = ACADEMIC_SITES.slice(0, 10).map(s => `site:${s}`).join(' OR ');
+      searchQuery = `${searchQuery} (${siteQuery})`;
+    }
+
+    // Add year filter
+    if (year_from || year_to) {
+      if (year_from && year_to) {
+        searchQuery = `${searchQuery} ${year_from}..${year_to}`;
+      } else if (year_from) {
+        searchQuery = `${searchQuery} after:${year_from - 1}`;
+      } else if (year_to) {
+        searchQuery = `${searchQuery} before:${year_to + 1}`;
+      }
+    }
+
+    // Add PDF filter
+    if (pdf_only) {
+      searchQuery = `${searchQuery} filetype:pdf`;
+    }
+
+    // Build Google Custom Search URL
     const params = new URLSearchParams({
-      query: query.trim(),
-      limit: String(num_results * 2), // Request more to filter
-      fields: PAPER_FIELDS,
+      key: apiKey,
+      cx: searchId,
+      q: searchQuery,
+      num: String(Math.min(num_results, 10)),
     });
 
-    // Add year filters
-    if (year_from) {
-      params.set('year', year_to ? `${year_from}-${year_to}` : `${year_from}-`);
-    } else if (year_to) {
-      params.set('year', `-${year_to}`);
+    // Add date sorting if requested
+    if (sort_by === 'date') {
+      params.set('sort', 'date');
     }
 
-    // Add field of study filter
-    if (fields_of_study && fields_of_study.length > 0) {
-      params.set('fieldsOfStudy', fields_of_study.join(','));
-    }
-
-    const url = `${SEMANTIC_SCHOLAR_API}/paper/search?${params.toString()}`;
+    const url = `${GOOGLE_SEARCH_API}?${params.toString()}`;
 
     // Make API request
     const response = await fetch(url, {
@@ -375,56 +594,59 @@ export async function handleAcademicSearch(input: AcademicSearchInput): Promise<
     });
 
     if (!response.ok) {
-      throw new Error(`Semantic Scholar API error: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Google API error: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json() as SemanticScholarSearchResponse;
+    const data = await response.json() as GoogleSearchResponse;
 
-    // Process and filter results
-    let papers = data.data || [];
+    // Process results
+    const items = data.items || [];
+    const totalResults = parseInt(data.searchInformation?.totalResults || '0', 10);
 
-    // Filter for open access if requested
-    if (open_access_only) {
-      papers = papers.filter(p => p.openAccessPdf?.url);
-    }
+    // Transform to academic paper format
+    const papers: AcademicPaperResult[] = items.map(item => {
+      const authors = extractAuthors(item);
+      const year = extractYear(item);
+      const venue = extractVenue(item);
+      const doi = extractDOI(item);
+      const arxivId = extractArxivId(item);
+      const pdfUrl = extractPdfUrl(item);
+      const abstract = extractAbstract(item);
 
-    // Sort results
-    if (sort_by === 'citations') {
-      papers.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
-    } else if (sort_by === 'date') {
-      papers.sort((a, b) => (b.year || 0) - (a.year || 0));
-    }
+      // Clean title (remove site name suffixes)
+      let title = item.title
+        .replace(/\s*[-|]\s*(arXiv|PubMed|IEEE|Nature|Springer|ResearchGate).*$/i, '')
+        .replace(/\s*\[.*\]\s*$/, '')
+        .trim();
 
-    // Limit to requested number
-    papers = papers.slice(0, num_results);
-
-    // Transform to output format
-    const results: AcademicPaperResult[] = papers.map(paper => ({
-      title: paper.title,
-      authors: paper.authors?.map(a => a.name) || [],
-      year: paper.year,
-      venue: paper.venue,
-      abstract: paper.abstract,
-      citationCount: paper.citationCount,
-      url: paper.url,
-      pdfUrl: paper.openAccessPdf?.url,
-      doi: paper.externalIds?.DOI,
-      arxivId: paper.externalIds?.ArXiv,
-      fieldsOfStudy: paper.fieldsOfStudy,
-      citations: generateCitations(paper),
-    }));
+      return {
+        title,
+        authors,
+        year,
+        venue,
+        abstract,
+        url: item.link,
+        pdfUrl,
+        doi,
+        arxivId,
+        source: item.displayLink,
+        citations: generateCitations({ title, authors, year, venue, doi, url: item.link }),
+      };
+    });
 
     // Build text content
     let textContent = `Academic Search Results for: "${query}"\n`;
-    textContent += `Found ${data.total} total papers, showing ${results.length}\n\n`;
+    textContent += `Source: Google Scholar Search (${source === 'all' ? 'all academic sources' : source})\n`;
+    textContent += `Found approximately ${totalResults} results, showing ${papers.length}\n\n`;
 
-    results.forEach((paper, index) => {
+    papers.forEach((paper, index) => {
       textContent += `--- Paper ${index + 1} ---\n`;
       textContent += `Title: ${paper.title}\n`;
       textContent += `Authors: ${paper.authors.join(', ')}\n`;
       if (paper.year) textContent += `Year: ${paper.year}\n`;
       if (paper.venue) textContent += `Venue: ${paper.venue}\n`;
-      if (paper.citationCount !== undefined) textContent += `Citations: ${paper.citationCount}\n`;
+      textContent += `Source: ${paper.source}\n`;
       if (paper.abstract) {
         const truncatedAbstract = paper.abstract.length > 300
           ? paper.abstract.substring(0, 300) + '...'
@@ -433,15 +655,17 @@ export async function handleAcademicSearch(input: AcademicSearchInput): Promise<
       }
       if (paper.pdfUrl) textContent += `PDF: ${paper.pdfUrl}\n`;
       if (paper.doi) textContent += `DOI: ${paper.doi}\n`;
+      if (paper.arxivId) textContent += `arXiv: ${paper.arxivId}\n`;
+      textContent += `URL: ${paper.url}\n`;
       textContent += `\nCitation (APA): ${paper.citations.apa}\n\n`;
     });
 
     const output: AcademicSearchOutput = {
-      papers: results,
+      papers,
       query: query.trim(),
-      totalResults: data.total,
-      resultCount: results.length,
-      source: 'Semantic Scholar',
+      totalResults,
+      resultCount: papers.length,
+      source: 'Google Scholar Search',
     };
 
     return {
@@ -457,7 +681,7 @@ export async function handleAcademicSearch(input: AcademicSearchInput): Promise<
         query: query.trim(),
         totalResults: 0,
         resultCount: 0,
-        source: 'Semantic Scholar',
+        source: 'Google Scholar Search',
       },
       isError: true,
     };
