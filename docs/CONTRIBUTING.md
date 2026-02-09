@@ -48,6 +48,20 @@ We are committed to fostering an open and welcoming environment. All contributor
     ```
     This will start the server and automatically reload it when you make changes.
 
+6.  **Verify Everything Works**:
+    ```bash
+    npm run test:e2e:stdio
+    ```
+    If you see "🎉 All stdio-based end-to-end tests passed!", your setup is complete.
+
+### Where to Start?
+
+- **Just want to run it?** → [Quick Start in README](../README.md#quick-start)
+- **Want to understand how it works?** → [Architecture Guide](./architecture/architecture.md)
+- **Want to add a new tool?** → [Adding New Tools Guide](./ADDING_NEW_TOOLS.md)
+- **Want to write tests?** → [Testing Guide](./testing-guide.md)
+- **Need to deploy?** → [Docker section in README](../README.md#running-with-docker)
+
 ### Making Changes
 
 1.  **Create a New Branch**:
