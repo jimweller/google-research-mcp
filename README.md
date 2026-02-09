@@ -1,11 +1,20 @@
 # Google Researcher MCP Server
 
 [![CI/CD](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/google-researcher-mcp.svg)](https://www.npmjs.com/package/google-researcher-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/CONTRIBUTING.md)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives AI assistants the ability to search Google, scrape web pages (including JavaScript-rendered sites), and extract YouTube transcripts. Built for performance, reliability, and security.
+> **An MCP server that gives AI assistants real-time web research capabilities.**
+
+This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables AI assistants like Claude, GPT, and other LLMs to:
+
+- **Search the web** via Google (general, images, news)
+- **Read any webpage** including JavaScript-rendered sites
+- **Extract YouTube transcripts** automatically
+- **Parse documents** (PDF, DOCX, PPTX)
+
+Built for production use with caching, quality scoring, and enterprise security.
 
 ## Quick Start
 
@@ -42,10 +51,60 @@ npm run dev            # Server is now running on STDIO transport
 
 > **Note:** This starts the server in STDIO mode, which is all you need for local AI assistant integrations. HTTP transport with OAuth is only required for web-based or multi-client setups — see [Choosing a Transport](#choosing-a-transport).
 
+### Verify It Works
+
+Once configured, ask your AI assistant:
+> "Search for the latest news about AI regulations"
+
+The assistant will use the `google_news_search` tool and return current articles. If you see search results, the server is working correctly.
+
+---
+
+## For AI Assistants (LLMs)
+
+**If you are an AI assistant reading this**, here's how to use this MCP server:
+
+### Recommended Tool Selection
+
+| Your Task | Use This Tool |
+|-----------|---------------|
+| Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call |
+| Find recent news | `google_news_search` — with freshness filtering |
+| Find images | `google_image_search` — with size/type filtering |
+| Get a list of URLs only | `google_search` — when you'll process pages yourself |
+| Read a specific URL you already have | `scrape_page` — also works for YouTube and documents |
+
+### Example Tool Calls
+
+```json
+// Research a topic (RECOMMENDED for most queries)
+{ "name": "search_and_scrape", "arguments": { "query": "climate change effects 2024", "num_results": 5 } }
+
+// Get recent news
+{ "name": "google_news_search", "arguments": { "query": "AI regulations", "freshness": "week" } }
+
+// Find images
+{ "name": "google_image_search", "arguments": { "query": "solar panel installation", "type": "photo" } }
+
+// Read a specific page
+{ "name": "scrape_page", "arguments": { "url": "https://example.com/article" } }
+
+// Get YouTube transcript
+{ "name": "scrape_page", "arguments": { "url": "https://www.youtube.com/watch?v=VIDEO_ID" } }
+```
+
+### Key Behaviors
+
+- **Caching**: Results are cached (30 min for search, 1 hour for scrape). Repeated queries are fast.
+- **Quality Scoring**: `search_and_scrape` ranks sources by relevance, freshness, authority, and content quality.
+- **Graceful Failures**: If some sources fail, you still get results from successful ones.
+- **Document Support**: `scrape_page` auto-detects PDFs, DOCX, PPTX and extracts text.
+
 ---
 
 ## Table of Contents
 
+- [For AI Assistants (LLMs)](#for-ai-assistants-llms)
 - [Available Tools](#available-tools)
 - [Features](#features)
 - [System Architecture](#system-architecture)
@@ -81,29 +140,88 @@ npm run dev            # Server is now running on STDIO transport
 | **`google_news_search`** | Current news | You need recent news articles with freshness filtering and date sorting. |
 | **`scrape_page`** | Reading a specific URL | You already have a URL and need its content. Also use for YouTube transcripts and documents (PDF, DOCX, PPTX). |
 
-### Tool Details
+### Tool Reference
 
-| Tool | Description |
-| :--- | :--- |
-| **`search_and_scrape`** | Searches Google and retrieves content from top results in one call. Returns combined, deduplicated text with source attribution. Sources are quality-scored (relevance, freshness, authority, content quality) and ranked. Handles JavaScript-rendered pages and fails gracefully if some sources are unavailable.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 3), `include_sources` (boolean, default true), `deduplicate` (boolean, default true). |
-| **`google_search`** | Returns ranked URLs from Google Custom Search. Use advanced filters for precise results: `site_search` (limit to domain), `time_range` (day/week/month/year), `exact_terms`, `exclude_terms`, `language`, `country`. Results cached 30 min.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), plus optional filters. |
-| **`google_image_search`** | Searches Google Images via Custom Search API. Returns image URLs, thumbnails, dimensions, and source context.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), `size` (huge/large/medium/small), `type` (clipart/face/lineart/photo/animated), `color_type` (color/gray/mono/trans), `dominant_color`, `file_type` (jpg/gif/png/bmp/svg/webp). |
-| **`google_news_search`** | Searches Google News via Custom Search API. Returns article headlines, snippets, publication dates, and sources.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), `freshness` (hour/day/week/month/year, default week), `sort_by` (relevance/date), `news_source` (filter to specific source). |
-| **`scrape_page`** | Extracts text from a URL. Auto-detects content type: web pages (static or JS-rendered), YouTube videos (transcript), documents (PDF/DOCX/PPTX). Results cached 1 hour.<br><br>**Parameters:** `url` (string, max 2048 chars). |
+#### `search_and_scrape` (Recommended for research)
+Searches Google and retrieves content from top results in one call. Returns quality-scored, deduplicated text with source attribution.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 3 | Number of results (1-10) |
+| `include_sources` | boolean | true | Append source URLs |
+| `deduplicate` | boolean | true | Remove duplicate content |
+
+#### `google_search`
+Returns ranked URLs from Google. Use when you only need links, not content.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 5 | Number of results (1-10) |
+| `time_range` | string | - | `day`, `week`, `month`, `year` |
+| `site_search` | string | - | Limit to domain |
+| `exact_terms` | string | - | Required phrase |
+| `exclude_terms` | string | - | Exclude words |
+
+#### `google_image_search`
+Searches Google Images with filtering options.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 5 | Number of results (1-10) |
+| `size` | string | - | `huge`, `large`, `medium`, `small` |
+| `type` | string | - | `clipart`, `face`, `lineart`, `photo`, `animated` |
+| `color_type` | string | - | `color`, `gray`, `mono`, `trans` |
+| `file_type` | string | - | `jpg`, `gif`, `png`, `bmp`, `svg`, `webp` |
+
+#### `google_news_search`
+Searches Google News with freshness and date sorting.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 5 | Number of results (1-10) |
+| `freshness` | string | week | `hour`, `day`, `week`, `month`, `year` |
+| `sort_by` | string | relevance | `relevance`, `date` |
+| `news_source` | string | - | Filter to specific source |
+
+#### `scrape_page`
+Extracts text from any URL. Auto-detects: web pages (static/JS), YouTube (transcript), documents (PDF/DOCX/PPTX).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `url` | string | required | URL to scrape (max 2048 chars) |
 
 ## Features
 
-- **Tiered Web Scraping**: Fast static HTML extraction (CheerioCrawler), with automatic Playwright/Chromium fallback for JavaScript-rendered pages. Zero configuration — Chromium is installed as part of setup.
-- **YouTube Transcript Extraction**: Robust extraction with 10 classified error types, automatic retries with exponential backoff for transient failures, and clear actionable error messages. See the [full documentation](./docs/youtube-transcript-extraction.md).
-- **Quality Scoring**: Sources in `search_and_scrape` are automatically scored and ranked by relevance (35%), freshness (20%), authority (25%), and content quality (20%). High-authority domains (.gov, .edu, major publications) are prioritized.
-- **MCP Resources**: Expose server state via the MCP Resources protocol — query recent searches, cache stats, and event store statistics programmatically.
-- **MCP Prompts**: Pre-built research workflow templates (`comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing`) for common use cases.
-- **Content Annotations**: Tool responses include MCP-compliant annotations (audience, priority, timestamp) to help clients filter and prioritize content.
-- **Persistent Caching**: Two-layer cache (in-memory + disk) with per-tool namespaces. Reduces latency on repeated queries and minimizes Google API costs. Manual and automated persistence via the [Management API](#management-api).
-- **Dual Transport**: STDIO for local MCP clients, HTTP+SSE for web applications and multi-client setups.
-- **Enterprise Security**: OAuth 2.1 with JWT validation, granular scopes, and SSRF protection for scraping.
-- **Graceful Degradation**: Comprehensive timeouts, resilient multi-source scraping (`Promise.allSettled`), and automatic error recovery.
-- **Monitoring**: Administrative endpoints for cache stats, event store stats, and cache management.
+### Core Capabilities
+| Feature | Description |
+|---------|-------------|
+| **Web Scraping** | Fast static HTML + automatic Playwright fallback for JavaScript-rendered pages |
+| **YouTube Transcripts** | Robust extraction with retry logic and 10 classified error types |
+| **Document Parsing** | Auto-detects and extracts text from PDF, DOCX, PPTX |
+| **Quality Scoring** | Sources ranked by relevance (35%), freshness (20%), authority (25%), content quality (20%) |
+
+### MCP Protocol Support
+| Feature | Description |
+|---------|-------------|
+| **Tools** | 5 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page` |
+| **Resources** | Expose server state (recent searches, cache stats, config) |
+| **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing` |
+| **Annotations** | Content tagged with audience, priority, and timestamps |
+
+### Production Ready
+| Feature | Description |
+|---------|-------------|
+| **Caching** | Two-layer (memory + disk) with per-tool namespaces, reduces API costs |
+| **Dual Transport** | STDIO for local clients, HTTP+SSE for web apps |
+| **Security** | OAuth 2.1, SSRF protection, granular scopes |
+| **Resilience** | Circuit breaker, timeouts, graceful degradation |
+| **Monitoring** | Admin endpoints for cache stats, event store, health checks |
+
+For detailed documentation: [YouTube Transcripts](./docs/youtube-transcript-extraction.md) · [Architecture](./docs/architecture/architecture.md) · [Testing](./docs/testing-guide.md)
 
 ## System Architecture
 
