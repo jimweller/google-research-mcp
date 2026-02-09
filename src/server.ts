@@ -75,6 +75,30 @@ import {
 } from "./shared/contentAnnotations.js";
 import { registerResources, trackSearch, type RecentSearch } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
+import {
+  type GoogleSearchResponse,
+  type GoogleImageSearchResponse,
+  type GoogleNewsSearchResponse,
+  getErrorMessage,
+} from "./types/googleApi.js";
+import {
+  sequentialSearchInputSchema,
+  sequentialSearchOutputSchema,
+  handleSequentialSearch,
+  getCurrentSessionForResource,
+  type SequentialSearchInput,
+} from "./tools/sequentialSearch.js";
+import {
+  academicSearchInputSchema,
+  academicSearchOutputSchema,
+  handleAcademicSearch,
+  type AcademicSearchInput,
+} from "./tools/academicSearch.js";
+import { TOOL_METADATA, getToolIcon, getToolMeta } from "./tools/toolMetadata.js";
+import {
+  sequentialSearchOutputSchema as seqSearchSchema,
+  academicSearchOutputSchema as acadSearchSchema,
+} from "./schemas/outputSchemas.js";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -481,8 +505,8 @@ function configureToolsAndResources(
                     if (!r.ok) throw new Error(`Search API error ${r.status}`);
                     return r;
                 });
-                const data = await resp.json();
-                const links: string[] = (data.items || []).map((i: any) => i.link);
+                const data = await resp.json() as GoogleSearchResponse;
+                const links: string[] = (data.items || []).map((item) => item.link);
                 return links.map((l) => ({ type: "text" as const, text: l }));
             },
             {
@@ -1494,6 +1518,97 @@ Ideal for current events, breaking news, and time-sensitive topics.
                     isError: true,
                 };
             }
+        }
+    );
+
+    // ── sequential_search Tool ─────────────────────────────────────────────────
+
+    server.registerTool(
+        "sequential_search",
+        {
+            title: "Sequential Search",
+            description: `Track multi-step research progress, following the pattern of sequential_thinking.
+
+**Purpose:** Helps you (the LLM) manage complex research by tracking:
+- Search steps and progress
+- Sources found with quality scores
+- Knowledge gaps you identify
+- Revisions and branching
+
+**Key Principle:** You do the reasoning; this tool tracks state.
+
+**When to Use:**
+- Complex questions requiring multiple searches
+- Research where sources need tracking
+- Iterative investigation with knowledge gaps
+
+**Example Flow:**
+1. Start: sequential_search(searchStep: "Starting research on X", stepNumber: 1, nextStepNeeded: true)
+2. Search: search_and_scrape("topic")
+3. Record: sequential_search(searchStep: "Found Y, need Z", stepNumber: 2, source: {...}, knowledgeGap: "...", nextStepNeeded: true)
+4. Complete: sequential_search(searchStep: "Research complete", stepNumber: 3, nextStepNeeded: false)`,
+            inputSchema: sequentialSearchInputSchema,
+            outputSchema: seqSearchSchema,
+            annotations: {
+                title: "Sequential Search",
+                readOnlyHint: false,
+                openWorldHint: false,
+            },
+        },
+        async (params) => {
+            const traceId = randomUUID();
+            logger.info('sequential_search invoked', { traceId, stepNumber: params.stepNumber });
+            return handleSequentialSearch(params as SequentialSearchInput);
+        }
+    );
+
+    // ── academic_search Tool ─────────────────────────────────────────────────────
+
+    server.registerTool(
+        "academic_search",
+        {
+            title: "Academic Paper Search",
+            description: `Search academic papers using Semantic Scholar API.
+
+**Best for:**
+- Finding peer-reviewed, authoritative sources
+- Research requiring citations and references
+- Technical/scientific topics
+- Literature reviews
+
+**Features:**
+- Paper titles, authors, abstracts
+- Citation counts and publication years
+- Direct PDF links (when available)
+- Pre-formatted citations (APA, MLA, BibTeX)
+
+**Free Tier:** 100 requests per 5 minutes, no API key required.
+
+**Note:** Papers don't change, so results are cached for 24 hours.`,
+            inputSchema: academicSearchInputSchema,
+            outputSchema: acadSearchSchema,
+            annotations: {
+                title: "Academic Paper Search",
+                readOnlyHint: true,
+                openWorldHint: true,
+            },
+        },
+        async (params) => {
+            const traceId = randomUUID();
+            logger.info('academic_search invoked', { traceId, query: params.query });
+
+            const result = await handleAcademicSearch(params as AcademicSearchInput);
+
+            // Track the search
+            trackSearch({
+                query: params.query,
+                timestamp: new Date().toISOString(),
+                resultCount: result.structuredContent.resultCount,
+                traceId,
+                tool: 'google_search', // Use existing type
+            });
+
+            return result;
         }
     );
 

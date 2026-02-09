@@ -69,6 +69,8 @@ The assistant will use the `google_news_search` tool and return current articles
 | Your Task | Use This Tool |
 |-----------|---------------|
 | Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call |
+| Multi-step research with tracking | `sequential_search` — tracks steps, sources, and gaps across multiple searches |
+| Find academic papers | `academic_search` — Semantic Scholar with citations (APA, MLA, BibTeX) |
 | Find recent news | `google_news_search` — with freshness filtering |
 | Find images | `google_image_search` — with size/type filtering |
 | Get a list of URLs only | `google_search` — when you'll process pages yourself |
@@ -79,6 +81,12 @@ The assistant will use the `google_news_search` tool and return current articles
 ```json
 // Research a topic (RECOMMENDED for most queries)
 { "name": "search_and_scrape", "arguments": { "query": "climate change effects 2024", "num_results": 5 } }
+
+// Multi-step research with tracking (for complex investigations)
+{ "name": "sequential_search", "arguments": { "searchStep": "Starting research on quantum computing", "stepNumber": 1, "totalStepsEstimate": 4, "nextStepNeeded": true } }
+
+// Find academic papers (peer-reviewed sources with citations)
+{ "name": "academic_search", "arguments": { "query": "transformer neural networks", "num_results": 5, "sort_by": "citations" } }
 
 // Get recent news
 { "name": "google_news_search", "arguments": { "query": "AI regulations", "freshness": "week" } }
@@ -135,6 +143,8 @@ The assistant will use the `google_news_search` tool and return current articles
 | Tool | Best For | Use When... |
 | :--- | :--- | :--- |
 | **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. Sources are quality-scored and ranked. |
+| **`sequential_search`** | **Multi-step research** | Complex investigations requiring multiple searches. Tracks steps, sources, and knowledge gaps. You do the reasoning; the tool tracks state. |
+| **`academic_search`** | **Peer-reviewed papers** | Research requiring authoritative academic sources. Returns papers with citations (APA, MLA, BibTeX), abstracts, and PDF links. |
 | **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or you want to process pages yourself with custom logic. |
 | **`google_image_search`** | Finding images | You need to find images on a topic with filtering by size, type, color, or format. |
 | **`google_news_search`** | Current news | You need recent news articles with freshness filtering and date sorting. |
@@ -194,6 +204,34 @@ Extracts text from any URL. Auto-detects: web pages (static/JS), YouTube (transc
 |-----------|------|---------|-------------|
 | `url` | string | required | URL to scrape (max 2048 chars) |
 
+#### `sequential_search`
+Tracks multi-step research state. Following the `sequential_thinking` pattern: **you do the reasoning, the tool tracks state**.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `searchStep` | string | required | Description of current step (1-2000 chars) |
+| `stepNumber` | number | required | Current step number (starts at 1) |
+| `totalStepsEstimate` | number | 5 | Estimated total steps (1-50) |
+| `nextStepNeeded` | boolean | required | `true` if more steps needed, `false` when done |
+| `source` | object | - | Source found: `{ url, summary, qualityScore? }` |
+| `knowledgeGap` | string | - | Gap identified — what's still missing |
+| `isRevision` | boolean | - | `true` if revising a previous step |
+| `revisesStep` | number | - | Step number being revised |
+| `branchId` | string | - | Identifier for branching research |
+
+#### `academic_search`
+Searches peer-reviewed papers via Semantic Scholar (free, no API key). Returns papers with pre-formatted citations.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 5 | Number of papers (1-10) |
+| `year_from` | number | - | Filter by min publication year |
+| `year_to` | number | - | Filter by max publication year |
+| `fields_of_study` | array | - | e.g., `["Computer Science", "Medicine"]` |
+| `open_access_only` | boolean | false | Only papers with free PDF |
+| `sort_by` | string | relevance | `relevance`, `citations`, `date` |
+
 ## Features
 
 ### Core Capabilities
@@ -207,7 +245,7 @@ Extracts text from any URL. Auto-detects: web pages (static/JS), YouTube (transc
 ### MCP Protocol Support
 | Feature | Description |
 |---------|-------------|
-| **Tools** | 5 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page` |
+| **Tools** | 7 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search` |
 | **Resources** | Expose server state (recent searches, cache stats, config) |
 | **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing` |
 | **Annotations** | Content tagged with audience, priority, and timestamps |

@@ -16,6 +16,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { PersistentCache } from '../cache/index.js';
 import type { PersistentEventStore } from '../shared/persistentEventStore.js';
+import { getCurrentSessionForResource } from '../tools/sequentialSearch.js';
+import { getResourceContent, listCachedResources, getResourceCacheStats } from '../shared/resourceLinks.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -248,6 +250,107 @@ export function registerResources(
       }
     );
   }
+
+  // ── search://session/current ────────────────────────────────────────────────
+  server.resource(
+    'current-research-session',
+    'search://session/current',
+    {
+      description: 'Current sequential search research session state',
+      mimeType: 'application/json',
+    },
+    async (uri) => {
+      const session = getCurrentSessionForResource();
+
+      if (!session) {
+        return {
+          contents: [
+            {
+              uri: uri.toString(),
+              mimeType: 'application/json',
+              text: JSON.stringify(
+                {
+                  active: false,
+                  message: 'No active research session',
+                  generatedAt: new Date().toISOString(),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      return {
+        contents: [
+          {
+            uri: uri.toString(),
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                active: true,
+                session: {
+                  sessionId: session.sessionId,
+                  question: session.question,
+                  currentStep: session.currentStep,
+                  totalStepsEstimate: session.totalStepsEstimate,
+                  isComplete: session.isComplete,
+                  sourceCount: session.sources.length,
+                  gapsCount: session.gaps.filter(g => !g.resolved).length,
+                  startedAt: session.startedAt,
+                  completedAt: session.completedAt,
+                },
+                sources: session.sources.map(s => ({
+                  url: s.url,
+                  summary: s.summary,
+                  qualityScore: s.qualityScore,
+                })),
+                gaps: session.gaps.map(g => ({
+                  description: g.description,
+                  resolved: g.resolved,
+                })),
+                generatedAt: new Date().toISOString(),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  // ── stats://resources ───────────────────────────────────────────────────────
+  server.resource(
+    'resource-cache-stats',
+    'stats://resources',
+    {
+      description: 'Statistics for resource_link content cache',
+      mimeType: 'application/json',
+    },
+    async (uri) => {
+      const stats = getResourceCacheStats();
+
+      return {
+        contents: [
+          {
+            uri: uri.toString(),
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                ...stats,
+                cachedUris: listCachedResources(),
+                generatedAt: new Date().toISOString(),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
 }
 
 // ── Utility Functions ────────────────────────────────────────────────────────

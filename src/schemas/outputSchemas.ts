@@ -289,3 +289,93 @@ export type GoogleNewsSearchOutput = {
   freshness: string;
   sortedBy: 'relevance' | 'date';
 };
+
+// ── Sequential Search Output ─────────────────────────────────────────────────
+
+/**
+ * Structured output schema for sequential_search tool
+ */
+export const sequentialSearchOutputSchema = {
+  /** Unique session identifier */
+  sessionId: z.string().uuid().describe('Unique session identifier'),
+  /** Current step number */
+  currentStep: z.number().int().describe('Current step number'),
+  /** Estimated total steps */
+  totalStepsEstimate: z.number().int().describe('Estimated total steps'),
+  /** Whether research is complete */
+  isComplete: z.boolean().describe('Whether research is marked as complete'),
+  /** Number of sources collected */
+  sourceCount: z.number().int().describe('Number of sources collected so far'),
+  /** Number of open knowledge gaps */
+  openGapsCount: z.number().int().describe('Number of unresolved knowledge gaps'),
+  /** Summary of current state */
+  stateSummary: z.string().describe('Human-readable summary of research state'),
+  /** All sources (included when complete) */
+  sources: z.array(z.object({
+    url: z.string(),
+    summary: z.string(),
+    qualityScore: z.number().optional(),
+  })).optional().describe('All sources collected (included when complete)'),
+  /** All gaps (included when complete) */
+  gaps: z.array(z.object({
+    description: z.string(),
+    resolved: z.boolean(),
+  })).optional().describe('All knowledge gaps (included when complete)'),
+};
+
+// ── Academic Search Output ───────────────────────────────────────────────────
+
+/**
+ * Schema for academic paper citations
+ */
+export const academicCitationsSchema = z.object({
+  apa: z.string().describe('APA 7th edition format'),
+  mla: z.string().describe('MLA 9th edition format'),
+  bibtex: z.string().describe('BibTeX format'),
+});
+
+/**
+ * Schema for academic paper result
+ */
+export const academicPaperSchema = z.object({
+  title: z.string().describe('Paper title'),
+  authors: z.array(z.string()).describe('List of author names'),
+  year: z.number().int().optional().describe('Publication year'),
+  venue: z.string().optional().describe('Journal or conference name'),
+  abstract: z.string().optional().describe('Paper abstract'),
+  citationCount: z.number().int().optional().describe('Number of citations'),
+  url: z.string().url().optional().describe('URL to paper page'),
+  pdfUrl: z.string().url().optional().describe('Direct URL to PDF'),
+  doi: z.string().optional().describe('Digital Object Identifier'),
+  arxivId: z.string().optional().describe('arXiv identifier'),
+  fieldsOfStudy: z.array(z.string()).optional().describe('Research fields'),
+  citations: academicCitationsSchema.describe('Pre-formatted citations'),
+});
+
+/**
+ * Structured output schema for academic_search tool
+ */
+export const academicSearchOutputSchema = {
+  /** Array of academic papers */
+  papers: z.array(academicPaperSchema).describe('List of academic papers'),
+  /** Original search query */
+  query: z.string().describe('The search query that was executed'),
+  /** Total results found */
+  totalResults: z.number().int().describe('Total papers matching query'),
+  /** Number of results returned */
+  resultCount: z.number().int().describe('Number of papers returned'),
+  /** Data source */
+  source: z.literal('Semantic Scholar').describe('Data source'),
+};
+
+/** Inferred type for academic paper */
+export type AcademicPaperOutput = z.infer<typeof academicPaperSchema>;
+
+/** Inferred type for academic_search structured output */
+export type AcademicSearchOutput = {
+  papers: AcademicPaperOutput[];
+  query: string;
+  totalResults: number;
+  resultCount: number;
+  source: 'Semantic Scholar';
+};
