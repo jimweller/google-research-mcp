@@ -70,7 +70,7 @@ The assistant will use the `google_news_search` tool and return current articles
 |-----------|---------------|
 | Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call |
 | Multi-step research with tracking | `sequential_search` — tracks steps, sources, and gaps across multiple searches |
-| Find academic papers | `academic_search` — Semantic Scholar with citations (APA, MLA, BibTeX) |
+| Find academic papers | `academic_search` — searches arXiv, PubMed, IEEE, etc. with citations (APA, MLA, BibTeX) |
 | Find recent news | `google_news_search` — with freshness filtering |
 | Find images | `google_image_search` — with size/type filtering |
 | Get a list of URLs only | `google_search` — when you'll process pages yourself |
@@ -86,7 +86,7 @@ The assistant will use the `google_news_search` tool and return current articles
 { "name": "sequential_search", "arguments": { "searchStep": "Starting research on quantum computing", "stepNumber": 1, "totalStepsEstimate": 4, "nextStepNeeded": true } }
 
 // Find academic papers (peer-reviewed sources with citations)
-{ "name": "academic_search", "arguments": { "query": "transformer neural networks", "num_results": 5, "sort_by": "citations" } }
+{ "name": "academic_search", "arguments": { "query": "transformer neural networks", "num_results": 5 } }
 
 // Get recent news
 { "name": "google_news_search", "arguments": { "query": "AI regulations", "freshness": "week" } }
@@ -220,7 +220,7 @@ Tracks multi-step research state. Following the `sequential_thinking` pattern: *
 | `branchId` | string | - | Identifier for branching research |
 
 #### `academic_search`
-Searches peer-reviewed papers via Semantic Scholar (free, no API key). Returns papers with pre-formatted citations.
+Searches academic papers via Google Custom Search API, filtered to academic sources (arXiv, PubMed, IEEE, Nature, Springer, etc.). Returns papers with pre-formatted citations.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -228,9 +228,9 @@ Searches peer-reviewed papers via Semantic Scholar (free, no API key). Returns p
 | `num_results` | number | 5 | Number of papers (1-10) |
 | `year_from` | number | - | Filter by min publication year |
 | `year_to` | number | - | Filter by max publication year |
-| `fields_of_study` | array | - | e.g., `["Computer Science", "Medicine"]` |
-| `open_access_only` | boolean | false | Only papers with free PDF |
-| `sort_by` | string | relevance | `relevance`, `citations`, `date` |
+| `source` | string | all | `all`, `arxiv`, `pubmed`, `ieee`, `nature`, `springer` |
+| `pdf_only` | boolean | false | Only return results with PDF links |
+| `sort_by` | string | relevance | `relevance`, `date` |
 
 ## Features
 

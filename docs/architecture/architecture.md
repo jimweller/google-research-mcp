@@ -30,7 +30,7 @@ The Google Researcher MCP Server is a backend service that implements the [Model
 -   **`scrape_page`**: Extracts text content from web pages, YouTube videos, and documents (PDF, DOCX, PPTX).
 -   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, with quality scoring and ranking.
 -   **`sequential_search`**: Tracks multi-step research state following the `sequential_thinking` pattern. Tracks steps, sources, knowledge gaps, and supports branching.
--   **`academic_search`**: Searches peer-reviewed papers via Semantic Scholar API with pre-formatted citations (APA, MLA, BibTeX).
+-   **`academic_search`**: Searches academic papers via Google Custom Search API (filtered to arXiv, PubMed, IEEE, etc.) with pre-formatted citations (APA, MLA, BibTeX).
 
 The server also exposes:
 -   **MCP Resources**: Server state (recent searches, cache stats, configuration) via the Resources protocol.
