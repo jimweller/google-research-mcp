@@ -37,5 +37,7 @@
   },
 
   // Make sure tsconfig is actually used when you run `tsc`
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Exclude test files from compilation (vitest handles them separately)
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "node_modules"]
 }
