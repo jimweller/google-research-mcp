@@ -1,18 +1,25 @@
 # API Documentation: `scrape_page` Tool
 
-This document provides detailed API documentation for the `scrape_page` tool, with a focus on its enhanced capabilities for extracting YouTube video transcripts.
+This document provides detailed API documentation for the `scrape_page` tool.
+
+## When to Use This Tool
+
+Use `scrape_page` when you have a **specific URL** and need its content. For researching a topic across multiple sources, use `search_and_scrape` instead — it's more efficient.
 
 ## Tool Overview
 
-The `scrape_page` tool is designed to extract text content from web pages and YouTube videos. It intelligently filters out noise (like ads and navigation menus) and can automatically retrieve video transcripts when available.
+The `scrape_page` tool extracts text content from:
+- **Web pages** — Static HTML (fast) or JavaScript-rendered SPAs (automatic Playwright fallback)
+- **YouTube videos** — Extracts transcript with robust error handling and retry logic
+- **Documents** — PDF, DOCX, PPTX files (extracts text and metadata)
+
+Results are cached for 1 hour.
 
 ### Input Schema
 
-The tool takes a single argument:
-
 | Parameter | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `url` | `string` | Yes | The URL of the web page or YouTube video to scrape. |
+| `url` | `string` | Yes | The URL to scrape. Supports web pages, YouTube videos, and documents (PDF, DOCX, PPTX). |
 
 **Example Request:**
 
@@ -60,6 +67,51 @@ For a YouTube URL, the `content` will be a single string containing the full vid
   ]
 }
 ```
+
+#### Successful Response (Document - PDF, DOCX, PPTX)
+
+For document URLs, the tool extracts text content and appends metadata.
+
+```json
+{
+  "tool_name": "scrape_page",
+  "content": [
+    {
+      "type": "text",
+      "text": "Document text content here...\n\n[Document: PDF, 15 pages, \"Annual Report 2024\"]"
+    }
+  ],
+  "structuredContent": {
+    "url": "https://example.com/report.pdf",
+    "content": "Document text content here...",
+    "contentType": "pdf",
+    "contentLength": 12500,
+    "truncated": false,
+    "metadata": {
+      "title": "Annual Report 2024",
+      "pageCount": 15
+    }
+  }
+}
+```
+
+**Supported document types:**
+- **PDF** — Extracts text (10 MB limit)
+- **DOCX** — Extracts text from Word documents
+- **PPTX** — Extracts text from PowerPoint slides
+
+## Structured Output
+
+All responses include a `structuredContent` field with typed data:
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `url` | string | The URL that was scraped |
+| `content` | string | Extracted text content |
+| `contentType` | enum | `html`, `youtube`, `pdf`, `docx`, or `pptx` |
+| `contentLength` | number | Length of content in characters |
+| `truncated` | boolean | Whether content was truncated due to size limits |
+| `metadata` | object | Optional document metadata (title, pageCount) |
 
 ## Enhanced YouTube Error Handling
 
