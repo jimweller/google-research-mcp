@@ -47,6 +47,57 @@ To deliver these capabilities reliably and efficiently, the server is built with
 -   **Reliability and Resilience**: Comprehensive timeout handling and graceful degradation ensure the server remains stable and responsive, even when external services are slow or fail.
 -   **Security by Default**: All web-facing endpoints are protected by an industry-standard OAuth 2.1 authorization layer.
 
+## Project Structure
+
+```
+google-researcher-mcp/
+├── src/                          # Source code
+│   ├── server.ts                 # Main entry point (transport, tools, routing)
+│   ├── cache/                    # Caching system (persistent LRU cache)
+│   │   ├── persistentCache.ts    # Main cache implementation
+│   │   ├── persistenceManager.ts # Disk persistence layer
+│   │   └── types.ts              # Cache interfaces
+│   ├── documents/                # Document parsing (PDF, DOCX, PPTX)
+│   ├── prompts/                  # MCP Prompts (research templates)
+│   ├── resources/                # MCP Resources (server state)
+│   ├── schemas/                  # Zod schemas for tool outputs
+│   ├── shared/                   # Shared utilities
+│   │   ├── circuitBreaker.ts     # Resilience for external APIs
+│   │   ├── contentAnnotations.ts # MCP content annotations
+│   │   ├── contentDeduplication.ts
+│   │   ├── contentSizeOptimization.ts
+│   │   ├── citationExtractor.ts  # Citation metadata extraction
+│   │   ├── envValidator.ts       # Startup validation
+│   │   ├── logger.ts             # Structured logging
+│   │   ├── oauthMiddleware.ts    # OAuth 2.1 for HTTP transport
+│   │   ├── persistentEventStore.ts # SSE session replay
+│   │   ├── qualityScoring.ts     # Source ranking
+│   │   └── urlValidator.ts       # SSRF protection
+│   ├── tools/                    # Standalone tool implementations
+│   │   ├── academicSearch.ts     # Academic paper search
+│   │   ├── patentSearch.ts       # Patent search
+│   │   ├── sequentialSearch.ts   # Multi-step research tracking
+│   │   └── toolMetadata.ts       # Icons and metadata for all tools
+│   ├── types/                    # TypeScript type definitions
+│   └── youtube/                  # YouTube transcript extraction
+├── docs/                         # Documentation
+│   ├── architecture/             # Architecture guides
+│   ├── CHANGELOG.md              # Version history
+│   ├── CONTRIBUTING.md           # Contribution guidelines
+│   └── testing-guide.md          # Testing philosophy
+├── tests/                        # End-to-end tests
+│   └── e2e/                      # STDIO/SSE transport tests
+├── .env.example                  # Environment variable template
+├── Dockerfile                    # Container image
+└── package.json                  # Dependencies and scripts
+```
+
+**Key Entry Points:**
+- **For users**: Start with `README.md` → Quick Start section
+- **For AI assistants**: `README.md` → "For AI Assistants (LLMs)" section
+- **For developers**: `docs/CONTRIBUTING.md` → Development setup
+- **For architecture**: This document → Component Deep-Dive section
+
 ## System Architecture Diagram
 
 The server employs a layered architecture that clearly defines the flow of data and control from the client to the external services.
