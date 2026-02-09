@@ -112,6 +112,71 @@ All responses include a `structuredContent` field with typed data:
 | `contentLength` | number | Length of content in characters |
 | `truncated` | boolean | Whether content was truncated due to size limits |
 | `metadata` | object | Optional document metadata (title, pageCount) |
+| `citation` | object | Citation metadata for web pages (see below) |
+
+## Citation Tracking
+
+For web pages, `scrape_page` automatically extracts citation metadata from HTML meta tags, Open Graph, Twitter Cards, and JSON-LD structured data. This enables proper attribution and academic citation.
+
+### Citation Fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `citation.metadata.title` | string | Page or article title |
+| `citation.metadata.author` | string | Author name(s) if available |
+| `citation.metadata.publishedDate` | string | Publication date (YYYY-MM-DD) |
+| `citation.metadata.siteName` | string | Name of website or publication |
+| `citation.metadata.description` | string | Brief description/excerpt |
+| `citation.url` | string | Source URL |
+| `citation.accessedDate` | string | Date content was accessed |
+| `citation.formatted.apa` | string | Pre-formatted APA 7th edition citation |
+| `citation.formatted.mla` | string | Pre-formatted MLA 9th edition citation |
+
+### Example Response with Citation
+
+```json
+{
+  "tool_name": "scrape_page",
+  "content": [
+    {
+      "type": "text",
+      "text": "Title: Understanding MCP Protocol\nHeadings: Introduction Implementation..."
+    }
+  ],
+  "structuredContent": {
+    "url": "https://example.com/article",
+    "content": "Title: Understanding MCP Protocol...",
+    "contentType": "html",
+    "contentLength": 5420,
+    "truncated": false,
+    "citation": {
+      "metadata": {
+        "title": "Understanding MCP Protocol",
+        "author": "John Doe",
+        "publishedDate": "2024-01-15",
+        "siteName": "Tech Blog",
+        "description": "A comprehensive guide to the Model Context Protocol."
+      },
+      "url": "https://example.com/article",
+      "accessedDate": "2024-02-08",
+      "formatted": {
+        "apa": "Doe, J. (2024, January 15). Understanding MCP Protocol. Tech Blog. https://example.com/article",
+        "mla": "Doe, John. \"Understanding MCP Protocol.\" Tech Blog, 15 Jan. 2024, example.com/article."
+      }
+    }
+  }
+}
+```
+
+### Metadata Extraction Sources
+
+The extractor checks these sources in priority order:
+
+1. **Open Graph** (`og:title`, `og:site_name`, `article:author`, `article:published_time`)
+2. **Twitter Cards** (`twitter:title`, `twitter:site`)
+3. **JSON-LD** (`@type: Article` with `author`, `datePublished`)
+4. **Standard meta tags** (`name="author"`, `name="description"`)
+5. **HTML elements** (`<title>` tag, domain from URL)
 
 ## Enhanced YouTube Error Handling
 

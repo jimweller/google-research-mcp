@@ -44,7 +44,14 @@ import {
   type GoogleSearchOutput,
   type ScrapePageOutput,
   type SearchAndScrapeOutput,
+  type CitationOutput,
+  type SourceOutput,
 } from "./schemas/outputSchemas.js";
+import {
+  createCitation,
+  extractCitationFromScrapedContent,
+  type Citation,
+} from "./shared/citationExtractor.js";
 import { CircuitBreaker, CircuitOpenError } from "./shared/circuitBreaker.js";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { validateEnvironmentOrExit, getValidatedEnvValue } from "./shared/envValidator.js";
@@ -481,10 +488,23 @@ function configureToolsAndResources(
      */
 
     /**
-     * Scrape a URL using CheerioCrawler (static HTML only, fast).
+     * Result from web scraping including content and citation data
      */
-    async function scrapeWithCheerio(url: string): Promise<string> {
+    interface ScrapeResult {
+        content: string;
+        rawHtml?: string;
+        citation?: Citation;
+    }
+
+    /**
+     * Scrape a URL using CheerioCrawler (static HTML only, fast).
+     * Returns both the processed content and citation metadata.
+     */
+    async function scrapeWithCheerio(url: string): Promise<ScrapeResult> {
         let page = "";
+        let rawHtml = "";
+        let citation: Citation | undefined;
+
         // Each crawler needs its own Configuration to avoid request queue corruption
         // when running multiple crawlers sequentially with maxRequestsPerCrawl: 1
         const crawlerConfig = new Configuration({
@@ -492,11 +512,23 @@ function configureToolsAndResources(
             storageClientOptions: { localDataDirectory: `${DEFAULT_CRAWLEE_STORAGE_PATH}/cheerio_${randomUUID()}` },
         });
         const crawler = new CheerioCrawler({
-            requestHandler: async ({ $ }) => {
+            requestHandler: async ({ $, body }) => {
                 if (typeof $ !== 'function') {
                     page = "[Non-HTML response — content could not be extracted]";
                     return;
                 }
+
+                // Capture raw HTML for citation extraction
+                rawHtml = typeof body === 'string' ? body : body.toString();
+
+                // Extract citation metadata from HTML
+                try {
+                    citation = createCitation(rawHtml, url);
+                } catch (e) {
+                    // Citation extraction failed, continue without it
+                    logger.debug('Citation extraction failed', { url: sanitizeUrl(url), error: String(e) });
+                }
+
                 const title = $("title").text() || "";
                 const headings = $("h1, h2, h3").map((_, el) => $(el).text()).get().join(" ");
                 const paragraphs = $("p").map((_, el) => $(el).text()).get().join(" ");
@@ -526,15 +558,19 @@ function configureToolsAndResources(
         }, crawlerConfig);
         const crawlPromise = crawler.run([{ url }]);
         await withTimeout(crawlPromise, SCRAPE_TIMEOUT_MS, 'Web page scraping');
-        return page;
+        return { content: page, rawHtml, citation };
     }
 
     /**
      * Scrape a URL using PlaywrightCrawler (renders JavaScript, slower).
      * Used as a fallback when CheerioCrawler returns insufficient content.
+     * Returns both the processed content and citation metadata.
      */
-    async function scrapeWithPlaywright(url: string): Promise<string> {
+    async function scrapeWithPlaywright(url: string): Promise<ScrapeResult> {
         let pageContent = "";
+        let rawHtml = "";
+        let citation: Citation | undefined;
+
         // Each crawler needs its own Configuration to avoid request queue corruption
         const crawlerConfig = new Configuration({
             persistStorage: false,
@@ -543,6 +579,18 @@ function configureToolsAndResources(
         const crawler = new PlaywrightCrawler({
             requestHandler: async ({ page }) => {
                 await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+
+                // Capture raw HTML for citation extraction
+                rawHtml = await page.content();
+
+                // Extract citation metadata from HTML
+                try {
+                    citation = createCitation(rawHtml, url);
+                } catch (e) {
+                    // Citation extraction failed, continue without it
+                    logger.debug('Citation extraction failed', { url: sanitizeUrl(url), error: String(e) });
+                }
+
                 const title = await page.title();
                 const extracted = await page.evaluate(() => {
                     const h = Array.from(document.querySelectorAll('h1, h2, h3'))
@@ -565,28 +613,38 @@ function configureToolsAndResources(
         }, crawlerConfig);
         const crawlPromise = crawler.run([{ url }]);
         await withTimeout(crawlPromise, PLAYWRIGHT_TIMEOUT_SECS * 1000, 'Playwright scraping');
-        return pageContent;
+        return { content: pageContent, rawHtml, citation };
     }
 
-    const scrapePageFn = async ({ url, traceId }: { url: string; traceId?: string }) => {
+    /**
+     * Internal result type for scrapePageFn that includes citation data
+     */
+    interface ScrapePageResult {
+        content: Array<{ type: "text"; text: string }>;
+        citation?: Citation;
+    }
+
+    const scrapePageFn = async ({ url, traceId }: { url: string; traceId?: string }): Promise<ScrapePageResult> => {
         // SSRF protection: validate URL before any network access
         try {
             await validateUrlForSSRF(url, SSRF_OPTIONS);
         } catch (error) {
             if (error instanceof SSRFProtectionError) {
-                return [{ type: "text" as const, text: `URL blocked: ${error.message}` }];
+                return { content: [{ type: "text" as const, text: `URL blocked: ${error.message}` }] };
             }
             throw error;
         }
 
         // Use a longer TTL for scraped content as it changes less frequently
         // Use the globally initialized cache instance directly
-        const result = await globalCacheInstance.getOrCompute(
+        const result = await globalCacheInstance.getOrCompute<ScrapePageResult>(
             'scrapePage',
             { url },
             async () => {
                 logger.debug('Cache MISS for scrapePage', { traceId, url: sanitizeUrl(url) });
                 let text = "";
+                let citation: Citation | undefined;
+
                 const yt = url.match(
                     /(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})(?:[&#?]|$)/
                 );
@@ -608,6 +666,7 @@ function configureToolsAndResources(
                             result.error!.originalError
                         );
                     }
+                    // YouTube doesn't have traditional citation metadata
                 } else if (isDocumentUrl(url)) {
                     // Document parsing: PDF, DOCX, PPTX
                     logger.info('Parsing document', { traceId, url: sanitizeUrl(url) });
@@ -631,19 +690,23 @@ function configureToolsAndResources(
                         text = `Failed to parse document: ${errorMsg}`;
                         logger.warn('Document parsing failed', { traceId, url: sanitizeUrl(url), error: errorMsg });
                     }
+                    // Documents don't have HTML-based citation metadata
                 } else {
                     // Circuit breaker + tiered scraping: fast static HTML first, JS rendering fallback
-                    text = await webScrapingCircuit.execute(async () => {
-                        let content = await scrapeWithCheerio(url);
+                    const scrapeResult = await webScrapingCircuit.execute(async () => {
+                        let result = await scrapeWithCheerio(url);
 
-                        if (content.length < MIN_CHEERIO_CONTENT_LENGTH) {
+                        if (result.content.length < MIN_CHEERIO_CONTENT_LENGTH) {
                             logger.info('Cheerio returned insufficient content, falling back to Playwright', {
-                                traceId, url: sanitizeUrl(url), cheerioLength: content.length
+                                traceId, url: sanitizeUrl(url), cheerioLength: result.content.length
                             });
-                            content = await scrapeWithPlaywright(url);
+                            result = await scrapeWithPlaywright(url);
                         }
-                        return content;
+                        return result;
                     });
+
+                    text = scrapeResult.content;
+                    citation = scrapeResult.citation;
                 }
 
                 // Limit content size to prevent memory issues
@@ -655,7 +718,10 @@ function configureToolsAndResources(
                            text.substring(text.length - halfSize);
                 }
 
-                return [{ type: "text" as const, text }];
+                return {
+                    content: [{ type: "text" as const, text }],
+                    citation,
+                };
             },
             {
                 ttl: SCRAPE_CACHE_TTL_MS,
@@ -747,7 +813,7 @@ function configureToolsAndResources(
             const traceId = randomUUID();
             logger.info('scrape_page invoked', { traceId, url });
             const result = await scrapePageFn({ url, traceId });
-            const textContent = result[0]?.text ?? '';
+            const textContent = result.content[0]?.text ?? '';
 
             // Detect content type from URL
             let contentType: ScrapePageOutput['contentType'] = 'html';
@@ -770,6 +836,17 @@ function configureToolsAndResources(
                 if (docMetaMatch[3]) metadata.title = docMetaMatch[3];
             }
 
+            // Convert Citation to CitationOutput for the response
+            let citation: CitationOutput | undefined;
+            if (result.citation) {
+                citation = {
+                    metadata: result.citation.metadata,
+                    url: result.citation.url,
+                    accessedDate: result.citation.accessedDate,
+                    formatted: result.citation.formatted,
+                };
+            }
+
             const structuredContent: ScrapePageOutput = {
                 url,
                 content: textContent,
@@ -777,10 +854,11 @@ function configureToolsAndResources(
                 contentLength: textContent.length,
                 truncated: textContent.includes('[... CONTENT TRUNCATED FOR SIZE LIMIT ...]'),
                 metadata,
+                citation,
             };
 
             return {
-                content: result,
+                content: result.content,
                 structuredContent,
             };
         }
@@ -855,20 +933,35 @@ function configureToolsAndResources(
 
             const scrapeResults = await Promise.allSettled(scrapePromises);
 
-            const successfulScrapes: { url: string; content: string }[] = [];
-            const allSources: SearchAndScrapeOutput['sources'] = [];
+            const successfulScrapes: { url: string; content: string; citation?: Citation }[] = [];
+            const allSources: SourceOutput[] = [];
             scrapeResults.forEach((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
-                        const content = result.value.result[0].text;
+                        const content = result.value.result.content[0].text;
+                        const citation = result.value.result.citation;
                         successfulScrapes.push({
                             url: result.value.url,
                             content,
+                            citation,
                         });
+
+                        // Convert Citation to CitationOutput for sources
+                        let citationOutput: CitationOutput | undefined;
+                        if (citation) {
+                            citationOutput = {
+                                metadata: citation.metadata,
+                                url: citation.url,
+                                accessedDate: citation.accessedDate,
+                                formatted: citation.formatted,
+                            };
+                        }
+
                         allSources.push({
                             url: result.value.url,
                             success: true,
                             contentLength: content.length,
+                            citation: citationOutput,
                         });
                     } else {
                         errors.push(result.value.error);
@@ -993,9 +1086,12 @@ async function setupStdioTransport() {
     process.exit(1);
   }
 
+  // Create MCP server instance
+  // Note: Tool capabilities are automatically declared when tools are registered via registerTool()
+  // The SDK handles capability negotiation during the initialization handshake
   stdioServerInstance = new McpServer({
     name: "google-researcher-mcp-stdio",
-    version: PKG_VERSION
+    version: PKG_VERSION,
   });
   configureToolsAndResources(stdioServerInstance);
   stdioTransportInstance = new StdioServerTransport();
@@ -1097,10 +1193,12 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
     return body.method === "initialize";
   }
 
-  // Create the MCP server
+  // Create MCP server instance
+  // Note: Tool capabilities are automatically declared when tools are registered via registerTool()
+  // The SDK handles capability negotiation during the initialization handshake
   const httpServer = new McpServer({
     name: "google-researcher-mcp-sse",
-    version: PKG_VERSION
+    version: PKG_VERSION,
   });
 
   configureToolsAndResources(httpServer);
