@@ -69,11 +69,21 @@ npm run dev            # Server is now running on STDIO transport
 
 ## Available Tools
 
+### When to Use Each Tool
+
+| Tool | Best For | Use When... |
+| :--- | :--- | :--- |
+| **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. |
+| **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or you want to process pages yourself with custom logic. |
+| **`scrape_page`** | Reading a specific URL | You already have a URL and need its content. Also use for YouTube transcripts and documents (PDF, DOCX, PPTX). |
+
+### Tool Details
+
 | Tool | Description |
 | :--- | :--- |
-| **`google_search`** | Search the web via Google Custom Search API. Returns ranked URLs with optional recency filtering (`day`, `week`, `month`, `year`). Results cached for 30 minutes.<br><br>**Parameters:** `query` (string, required, 1-500 chars), `num_results` (number, optional, 1-10, default 5), `time_range` (string, optional: `day` \| `week` \| `month` \| `year`). |
-| **`scrape_page`** | Extract text from any web page or YouTube video. Static pages are scraped instantly with CheerioCrawler; JavaScript-heavy sites (React, Next.js, SPAs) automatically fall back to Playwright/Chromium. YouTube URLs auto-extract transcripts with retry logic. Results cached for 1 hour.<br><br>**Parameters:** `url` (string, required, max 2048 chars). |
-| **`search_and_scrape`** | Composite tool: searches Google, scrapes the top results in parallel, and returns combined content with source attribution. Ideal for multi-source research in a single call.<br><br>**Parameters:** `query` (string, required, 1-500 chars), `num_results` (number, optional, 1-10, default 3), `include_sources` (boolean, optional, default true). |
+| **`search_and_scrape`** | Searches Google and retrieves content from top results in one call. Returns combined, deduplicated text with source attribution. Handles JavaScript-rendered pages and fails gracefully if some sources are unavailable.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 3), `include_sources` (boolean, default true), `deduplicate` (boolean, default true). |
+| **`google_search`** | Returns ranked URLs from Google Custom Search. Use advanced filters for precise results: `site_search` (limit to domain), `time_range` (day/week/month/year), `exact_terms`, `exclude_terms`, `language`, `country`. Results cached 30 min.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), plus optional filters. |
+| **`scrape_page`** | Extracts text from a URL. Auto-detects content type: web pages (static or JS-rendered), YouTube videos (transcript), documents (PDF/DOCX/PPTX). Results cached 1 hour.<br><br>**Parameters:** `url` (string, max 2048 chars). |
 
 ## Features
 

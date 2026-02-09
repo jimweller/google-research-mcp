@@ -672,7 +672,7 @@ function configureToolsAndResources(
         "google_search",
         {
             title: "Google Search",
-            description: "Search the web using Google Custom Search API. Returns a list of URLs matching the query.",
+            description: "Search the web and get a list of relevant URLs. Use this when you need to FIND sources but will process them yourself, or when you only need URLs without content. For research that needs actual page content, use search_and_scrape instead - it's more efficient than calling google_search + scrape_page separately. Results are cached for 30 minutes.",
             inputSchema: {
                 query: z.string().min(1).max(500).describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
                 num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage."),
@@ -732,9 +732,9 @@ function configureToolsAndResources(
         "scrape_page",
         {
             title: "Scrape Page",
-            description: "Scrape content from a web page, YouTube video transcript, or document (PDF, DOCX, PPTX).",
+            description: "Extract text content from a specific URL you already have. Handles web pages (static and JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX). Use this when you have a specific URL to read. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.",
             inputSchema: {
-                url: z.string().url().max(2048).describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
+                url: z.string().url().max(2048).describe("The URL to scrape. Supports: web pages (static HTML and JavaScript-rendered SPAs), YouTube videos (extracts transcript automatically), and documents (PDF, DOCX, PPTX - extracts text content).")
             },
             outputSchema: scrapePageOutputSchema,
             annotations: {
@@ -791,12 +791,12 @@ function configureToolsAndResources(
         "search_and_scrape",
         {
             title: "Search and Scrape",
-            description: "Search Google and scrape the top results, combining content from multiple sources.",
+            description: "Best for research: searches Google AND retrieves content from top results in one call. Returns combined, deduplicated content with source attribution. Use this as your PRIMARY tool for answering questions that need web research. More efficient than calling google_search + scrape_page separately. Only use google_search alone when you just need URLs, or scrape_page alone when you already have a specific URL.",
             inputSchema: {
-                query: z.string().min(1).max(500).describe("The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources."),
-                num_results: z.number().min(1).max(10).default(3).describe("Number of URLs to search for and scrape (1-10). More sources provide broader coverage but increase latency."),
-                include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs at the end of the output."),
-                deduplicate: z.boolean().default(true).describe("When true (default), removes duplicate and near-duplicate content across sources. Reduces redundancy when multiple sources quote the same material. Set to false for raw unprocessed content."),
+                query: z.string().min(1).max(500).describe("Your research question or topic. Be specific for better results. Example: 'Python async best practices 2024' rather than just 'Python'."),
+                num_results: z.number().min(1).max(10).default(3).describe("Number of sources to fetch (1-10). Default 3 is good for most queries. Use 5-8 for comprehensive research, 1-2 for quick factual lookups."),
+                include_sources: z.boolean().default(true).describe("Include source URLs at the end for citation. Default true - recommended for transparency."),
+                deduplicate: z.boolean().default(true).describe("Remove duplicate content across sources. Default true - recommended to reduce noise when sources quote each other."),
             },
             outputSchema: searchAndScrapeOutputSchema,
             annotations: {
