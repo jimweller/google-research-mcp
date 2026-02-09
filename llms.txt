@@ -15,11 +15,11 @@
 | Research any topic | `search_and_scrape` | `{"query": "climate change 2024", "num_results": 5}` |
 | Multi-step investigation | `sequential_search` | Track progress across 3+ searches |
 | Find academic papers | `academic_search` | Returns papers with APA/MLA/BibTeX citations |
-| Patent research | `patent_search` | Prior art, FTO analysis |
-| Company patent portfolio | `scrape_page` | Use `patents.google.com/?assignee=CompanyName` |
-| Recent news | `google_news_search` | With freshness filtering |
-| Images | `google_image_search` | Photos, diagrams, illustrations |
-| Specific URL content | `scrape_page` | Also handles YouTube transcripts, PDFs, DOCX |
+| Patent research | `patent_search` | Prior art, FTO analysis, assignee/inventor search |
+| Company patent portfolio | `scrape_page` | Use `patents.google.com/?assignee=CompanyName` for comprehensive results |
+| Recent news | `google_news_search` | With freshness filtering (hour/day/week/month) |
+| Images | `google_image_search` | Photos, diagrams, illustrations with size/type filters |
+| Specific URL content | `scrape_page` | Web pages, YouTube transcripts, PDFs, DOCX, PPTX |
 
 ## Available Prompts
 
@@ -52,8 +52,10 @@ Use `prompts/get` to retrieve these research workflow templates:
 | URI | Description |
 |-----|-------------|
 | `search://recent` | Last 20 search queries |
-| `search://session/current` | Active research session state |
+| `search://session/current` | Active sequential_search research session state |
 | `stats://cache` | Cache hit rates and performance |
+| `stats://events` | Event store statistics |
+| `stats://resources` | Resource cache statistics |
 | `config://server` | Server capabilities and limits |
 
 ## Best Practices for LLMs

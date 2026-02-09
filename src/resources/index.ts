@@ -166,6 +166,7 @@ export function registerResources(
                   'search_and_scrape',
                   'sequential_search',
                   'academic_search',
+                  'patent_search',
                 ],
                 limits: {
                   maxScrapeContentSize: '50 KB',

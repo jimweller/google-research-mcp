@@ -506,7 +506,7 @@ Run multiple searches in quick succession to verify:
 
 Check cache stats via MCP resources:
 ```
-cache://stats
+stats://cache
 ```
 
 Should show hit/miss ratios and entry counts.

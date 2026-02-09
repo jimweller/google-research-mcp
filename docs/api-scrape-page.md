@@ -20,6 +20,8 @@ Results are cached for 1 hour.
 | Parameter | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `url` | `string` | Yes | The URL to scrape. Supports web pages, YouTube videos, and documents (PDF, DOCX, PPTX). |
+| `max_length` | `number` | No | Maximum content length in characters. Default: 50KB. Content exceeding this is truncated at natural breakpoints. |
+| `mode` | `string` | No | `full` (default) returns content, `preview` returns metadata + structure only (useful to check size before fetching). |
 
 **Example Request:**
 
