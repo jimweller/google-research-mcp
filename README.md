@@ -71,6 +71,7 @@ The assistant will use the `google_news_search` tool and return current articles
 | Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call |
 | Multi-step research with tracking | `sequential_search` — tracks steps, sources, and gaps across multiple searches |
 | Find academic papers | `academic_search` — searches arXiv, PubMed, IEEE, etc. with citations (APA, MLA, BibTeX) |
+| Search patents | `patent_search` — searches Google Patents for prior art, FTO analysis, patent landscaping |
 | Find recent news | `google_news_search` — with freshness filtering |
 | Find images | `google_image_search` — with size/type filtering |
 | Get a list of URLs only | `google_search` — when you'll process pages yourself |
@@ -87,6 +88,9 @@ The assistant will use the `google_news_search` tool and return current articles
 
 // Find academic papers (peer-reviewed sources with citations)
 { "name": "academic_search", "arguments": { "query": "transformer neural networks", "num_results": 5 } }
+
+// Search patents (prior art, FTO analysis)
+{ "name": "patent_search", "arguments": { "query": "machine learning optimization", "search_type": "prior_art" } }
 
 // Get recent news
 { "name": "google_news_search", "arguments": { "query": "AI regulations", "freshness": "week" } }
@@ -145,6 +149,7 @@ The assistant will use the `google_news_search` tool and return current articles
 | **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. Sources are quality-scored and ranked. |
 | **`sequential_search`** | **Multi-step research** | Complex investigations requiring multiple searches. Tracks steps, sources, and knowledge gaps. You do the reasoning; the tool tracks state. |
 | **`academic_search`** | **Peer-reviewed papers** | Research requiring authoritative academic sources. Returns papers with citations (APA, MLA, BibTeX), abstracts, and PDF links. |
+| **`patent_search`** | **Patent research** | Prior art search, freedom to operate (FTO) analysis, patent landscaping. Returns patents with numbers, assignees, inventors, and PDF links. |
 | **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or you want to process pages yourself with custom logic. |
 | **`google_image_search`** | Finding images | You need to find images on a topic with filtering by size, type, color, or format. |
 | **`google_news_search`** | Current news | You need recent news articles with freshness filtering and date sorting. |
@@ -153,7 +158,7 @@ The assistant will use the `google_news_search` tool and return current articles
 ### Tool Reference
 
 #### `search_and_scrape` (Recommended for research)
-Searches Google and retrieves content from top results in one call. Returns quality-scored, deduplicated text with source attribution.
+Searches Google and retrieves content from top results in one call. Returns quality-scored, deduplicated text with source attribution. Includes size metadata (`estimatedTokens`, `sizeCategory`, `truncated`) in response.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -161,6 +166,9 @@ Searches Google and retrieves content from top results in one call. Returns qual
 | `num_results` | number | 3 | Number of results (1-10) |
 | `include_sources` | boolean | true | Append source URLs |
 | `deduplicate` | boolean | true | Remove duplicate content |
+| `max_length_per_source` | number | 50KB | Max content per source in chars |
+| `total_max_length` | number | 300KB | Max total combined content in chars |
+| `filter_by_query` | boolean | false | Filter to only paragraphs containing query keywords |
 
 #### `google_search`
 Returns ranked URLs from Google. Use when you only need links, not content.
@@ -203,6 +211,8 @@ Extracts text from any URL. Auto-detects: web pages (static/JS), YouTube (transc
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `url` | string | required | URL to scrape (max 2048 chars) |
+| `max_length` | number | 50KB | Maximum content length in chars. Content exceeding this is truncated at natural breakpoints. |
+| `mode` | string | full | `full` returns content, `preview` returns metadata + structure only (useful to check size before fetching) |
 
 #### `sequential_search`
 Tracks multi-step research state. Following the `sequential_thinking` pattern: **you do the reasoning, the tool tracks state**.
@@ -232,6 +242,21 @@ Searches academic papers via Google Custom Search API, filtered to academic sour
 | `pdf_only` | boolean | false | Only return results with PDF links |
 | `sort_by` | string | relevance | `relevance`, `date` |
 
+#### `patent_search`
+Searches Google Patents for prior art, freedom to operate (FTO) analysis, and patent landscaping. Returns patents with numbers, assignees, inventors, and PDF links.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query (1-500 chars) |
+| `num_results` | number | 5 | Number of results (1-10) |
+| `search_type` | string | prior_art | `prior_art`, `specific`, `landscape` |
+| `patent_office` | string | all | `all`, `US`, `EP`, `WO`, `JP`, `CN`, `KR` |
+| `assignee` | string | - | Filter by assignee/company |
+| `inventor` | string | - | Filter by inventor name |
+| `cpc_code` | string | - | Filter by CPC classification code |
+| `year_from` | number | - | Filter by min year |
+| `year_to` | number | - | Filter by max year |
+
 ## Features
 
 ### Core Capabilities
@@ -245,7 +270,7 @@ Searches academic papers via Google Custom Search API, filtered to academic sour
 ### MCP Protocol Support
 | Feature | Description |
 |---------|-------------|
-| **Tools** | 7 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search` |
+| **Tools** | 8 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search`, `patent_search` |
 | **Resources** | Expose server state (recent searches, cache stats, config) |
 | **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing` |
 | **Annotations** | Content tagged with audience, priority, and timestamps |

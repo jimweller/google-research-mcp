@@ -73,6 +73,8 @@ describe('outputSchemas', () => {
         contentType: 'html',
         contentLength: 17,
         truncated: false,
+        estimatedTokens: 5,
+        sizeCategory: 'small',
       };
 
       const schema = z.object(scrapePageOutputSchema);
@@ -87,6 +89,8 @@ describe('outputSchemas', () => {
         contentType: 'youtube',
         contentLength: 22,
         truncated: false,
+        estimatedTokens: 6,
+        sizeCategory: 'small',
       };
 
       const schema = z.object(scrapePageOutputSchema);
@@ -101,6 +105,8 @@ describe('outputSchemas', () => {
         contentType: 'pdf',
         contentLength: 11,
         truncated: false,
+        estimatedTokens: 3,
+        sizeCategory: 'small',
         metadata: {
           title: 'My Document',
           pageCount: 10,
@@ -119,6 +125,8 @@ describe('outputSchemas', () => {
         contentType: 'html',
         contentLength: 7,
         truncated: false,
+        estimatedTokens: 2,
+        sizeCategory: 'small',
       };
 
       const schema = z.object(scrapePageOutputSchema);
@@ -136,6 +144,8 @@ describe('outputSchemas', () => {
           contentType,
           contentLength: 7,
           truncated: false,
+          estimatedTokens: 2,
+          sizeCategory: 'small',
         };
 
         const schema = z.object(scrapePageOutputSchema);
@@ -151,11 +161,50 @@ describe('outputSchemas', () => {
         contentType: 'invalid',
         contentLength: 7,
         truncated: false,
+        estimatedTokens: 2,
+        sizeCategory: 'small',
       };
 
       const schema = z.object(scrapePageOutputSchema);
       const result = schema.safeParse(invalidOutput);
       expect(result.success).toBe(false);
+    });
+
+    it('validates all size categories', () => {
+      const categories: ScrapePageOutput['sizeCategory'][] = ['small', 'medium', 'large', 'very_large'];
+
+      for (const sizeCategory of categories) {
+        const validOutput: ScrapePageOutput = {
+          url: 'https://example.com',
+          content: 'Content',
+          contentType: 'html',
+          contentLength: 7,
+          truncated: false,
+          estimatedTokens: 2,
+          sizeCategory,
+        };
+
+        const schema = z.object(scrapePageOutputSchema);
+        const result = schema.safeParse(validOutput);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it('accepts output with originalLength when truncated', () => {
+      const validOutput: ScrapePageOutput = {
+        url: 'https://example.com',
+        content: 'Truncated content...',
+        contentType: 'html',
+        contentLength: 20,
+        truncated: true,
+        estimatedTokens: 5,
+        sizeCategory: 'small',
+        originalLength: 50000,
+      };
+
+      const schema = z.object(scrapePageOutputSchema);
+      const result = schema.safeParse(validOutput);
+      expect(result.success).toBe(true);
     });
   });
 
@@ -174,6 +223,12 @@ describe('outputSchemas', () => {
           processingTimeMs: 1500,
           duplicatesRemoved: 5,
           reductionPercent: 15.5,
+        },
+        sizeMetadata: {
+          contentLength: 29,
+          estimatedTokens: 8,
+          truncated: false,
+          sizeCategory: 'small',
         },
       };
 
@@ -194,6 +249,12 @@ describe('outputSchemas', () => {
           urlsScraped: 1,
           processingTimeMs: 500,
         },
+        sizeMetadata: {
+          contentLength: 7,
+          estimatedTokens: 2,
+          truncated: false,
+          sizeCategory: 'small',
+        },
       };
 
       const schema = z.object(searchAndScrapeOutputSchema);
@@ -210,6 +271,12 @@ describe('outputSchemas', () => {
           urlsSearched: 0,
           urlsScraped: 0,
           processingTimeMs: 100,
+        },
+        sizeMetadata: {
+          contentLength: 0,
+          estimatedTokens: 0,
+          truncated: false,
+          sizeCategory: 'small',
         },
       };
 
@@ -230,6 +297,36 @@ describe('outputSchemas', () => {
           urlsScraped: 0,
           processingTimeMs: 1000,
         },
+        sizeMetadata: {
+          contentLength: 0,
+          estimatedTokens: 0,
+          truncated: false,
+          sizeCategory: 'small',
+        },
+      };
+
+      const schema = z.object(searchAndScrapeOutputSchema);
+      const result = schema.safeParse(validOutput);
+      expect(result.success).toBe(true);
+    });
+
+    it('validates output with truncation metadata', () => {
+      const validOutput: SearchAndScrapeOutput = {
+        query: 'test',
+        sources: [{ url: 'https://example.com', success: true }],
+        combinedContent: 'truncated...',
+        summary: {
+          urlsSearched: 1,
+          urlsScraped: 1,
+          processingTimeMs: 500,
+        },
+        sizeMetadata: {
+          contentLength: 12,
+          estimatedTokens: 3,
+          truncated: true,
+          originalLength: 100000,
+          sizeCategory: 'small',
+        },
       };
 
       const schema = z.object(searchAndScrapeOutputSchema);
@@ -249,6 +346,12 @@ describe('outputSchemas', () => {
           urlsScraped: 1,
           processingTimeMs: 500,
         },
+        sizeMetadata: {
+          contentLength: 7,
+          estimatedTokens: 2,
+          truncated: false,
+          sizeCategory: 'small',
+        },
       };
 
       const schema = z.object(searchAndScrapeOutputSchema);
@@ -264,6 +367,12 @@ describe('outputSchemas', () => {
         summary: {
           urlsSearched: 1,
           // Missing urlsScraped and processingTimeMs
+        },
+        sizeMetadata: {
+          contentLength: 0,
+          estimatedTokens: 0,
+          truncated: false,
+          sizeCategory: 'small',
         },
       };
 
@@ -295,11 +404,14 @@ describe('outputSchemas', () => {
         contentType: 'html',
         contentLength: 7,
         truncated: false,
+        estimatedTokens: 2,
+        sizeCategory: 'small',
         metadata: { title: 'Title', pageCount: 5 },
       };
 
       expect(output.contentType).toBe('html');
       expect(output.metadata?.title).toBe('Title');
+      expect(output.sizeCategory).toBe('small');
     });
 
     it('SearchAndScrapeOutput type matches schema structure', () => {
@@ -312,10 +424,17 @@ describe('outputSchemas', () => {
           urlsScraped: 1,
           processingTimeMs: 100,
         },
+        sizeMetadata: {
+          contentLength: 8,
+          estimatedTokens: 2,
+          truncated: false,
+          sizeCategory: 'small',
+        },
       };
 
       expect(output.sources).toHaveLength(1);
       expect(output.summary.processingTimeMs).toBe(100);
+      expect(output.sizeMetadata.sizeCategory).toBe('small');
     });
   });
 });

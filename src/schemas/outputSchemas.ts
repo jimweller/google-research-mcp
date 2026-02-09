@@ -82,6 +82,55 @@ export type GoogleSearchOutput = {
   resultCount: number;
 };
 
+// ── Content Size Metadata Schema ───────────────────────────────────────────
+
+/**
+ * Schema for content size metadata
+ */
+export const sizeMetadataSchema = z.object({
+  /** Content length in characters */
+  contentLength: z.number().int().min(0).describe('Content length in characters'),
+  /** Estimated token count (approximate) */
+  estimatedTokens: z.number().int().min(0).describe('Estimated token count (~4 chars/token)'),
+  /** Whether content was truncated */
+  truncated: z.boolean().describe('Whether content was truncated'),
+  /** Original length before truncation */
+  originalLength: z.number().int().optional().describe('Original length if truncated'),
+  /** Size category */
+  sizeCategory: z.enum(['small', 'medium', 'large', 'very_large']).describe('Size category'),
+});
+
+/** Inferred type for size metadata */
+export type SizeMetadataOutput = z.infer<typeof sizeMetadataSchema>;
+
+// ── Content Preview Schema ─────────────────────────────────────────────────
+
+/**
+ * Schema for content preview (metadata without full content)
+ */
+export const contentPreviewSchema = z.object({
+  /** Original URL */
+  url: z.string().url().describe('Original URL'),
+  /** Page title if available */
+  title: z.string().optional().describe('Page title'),
+  /** Content length in characters */
+  contentLength: z.number().int().describe('Content length in characters'),
+  /** Estimated token count */
+  estimatedTokens: z.number().int().describe('Estimated token count'),
+  /** List of headings found */
+  headings: z.array(z.object({
+    level: z.number().int().min(1).max(6),
+    text: z.string(),
+  })).describe('Headings extracted from content'),
+  /** First paragraph or excerpt */
+  excerpt: z.string().describe('First paragraph or excerpt'),
+  /** Size category */
+  sizeCategory: z.enum(['small', 'medium', 'large', 'very_large']).describe('Size category'),
+});
+
+/** Inferred type for content preview */
+export type ContentPreviewOutput = z.infer<typeof contentPreviewSchema>;
+
 // ── Scrape Page Output ─────────────────────────────────────────────────────
 
 /**
@@ -90,7 +139,7 @@ export type GoogleSearchOutput = {
 export const scrapePageOutputSchema = {
   /** The URL that was scraped */
   url: z.string().url().describe('The URL that was scraped'),
-  /** Extracted text content */
+  /** Extracted text content (empty in preview mode) */
   content: z.string().describe('The extracted text content from the page'),
   /** Type of content extracted */
   contentType: z.enum(['html', 'youtube', 'pdf', 'docx', 'pptx']).describe('The type of content that was extracted'),
@@ -98,6 +147,12 @@ export const scrapePageOutputSchema = {
   contentLength: z.number().int().min(0).describe('Length of the extracted content in characters'),
   /** Whether content was truncated */
   truncated: z.boolean().describe('Whether the content was truncated due to size limits'),
+  /** Estimated token count */
+  estimatedTokens: z.number().int().min(0).describe('Estimated token count (~4 chars/token)'),
+  /** Size category */
+  sizeCategory: z.enum(['small', 'medium', 'large', 'very_large']).describe('Size category based on content length'),
+  /** Original length before truncation (if truncated) */
+  originalLength: z.number().int().optional().describe('Original content length before truncation'),
   /** Document metadata (for document types) */
   metadata: z.object({
     title: z.string().optional().describe('Document title if available'),
@@ -105,6 +160,8 @@ export const scrapePageOutputSchema = {
   }).optional().describe('Additional metadata for documents'),
   /** Citation information (for web pages) */
   citation: citationSchema.optional().describe('Citation information with metadata and formatted strings'),
+  /** Preview information (when mode=preview) */
+  preview: contentPreviewSchema.optional().describe('Content preview with structure (when mode=preview)'),
 };
 
 /** Inferred type for scrape_page structured output */
@@ -114,11 +171,15 @@ export type ScrapePageOutput = {
   contentType: 'html' | 'youtube' | 'pdf' | 'docx' | 'pptx';
   contentLength: number;
   truncated: boolean;
+  estimatedTokens: number;
+  sizeCategory: 'small' | 'medium' | 'large' | 'very_large';
+  originalLength?: number;
   metadata?: {
     title?: string;
     pageCount?: number;
   };
   citation?: CitationOutput;
+  preview?: ContentPreviewOutput;
 };
 
 // ── Search and Scrape Output ───────────────────────────────────────────────
@@ -152,6 +213,8 @@ export const searchAndScrapeOutputSchema = {
     duplicatesRemoved: z.number().int().optional().describe('Number of duplicate paragraphs removed'),
     reductionPercent: z.number().optional().describe('Percentage reduction from deduplication'),
   }).describe('Summary statistics for the operation'),
+  /** Size metadata for the response */
+  sizeMetadata: sizeMetadataSchema.describe('Size information for the combined content'),
 };
 
 /** Inferred type for source in search_and_scrape */
@@ -175,6 +238,7 @@ export type SearchAndScrapeOutput = {
     duplicatesRemoved?: number;
     reductionPercent?: number;
   };
+  sizeMetadata: SizeMetadataOutput;
 };
 
 // ── Quality Scores Schema ─────────────────────────────────────────────────────
@@ -377,4 +441,65 @@ export type AcademicSearchOutput = {
   totalResults: number;
   resultCount: number;
   source: 'Google Scholar Search';
+};
+
+// ── Patent Search Output ───────────────────────────────────────────────────
+
+/**
+ * Schema for patent result
+ */
+export const patentResultSchema = z.object({
+  /** Patent title */
+  title: z.string().describe('Patent title'),
+  /** Patent number (e.g., US1234567B2) */
+  patentNumber: z.string().describe('Patent number with country prefix'),
+  /** URL to patent page */
+  url: z.string().url().describe('URL to Google Patents page'),
+  /** Patent abstract/description */
+  abstract: z.string().optional().describe('Patent abstract or snippet'),
+  /** Inventor names */
+  inventors: z.array(z.string()).optional().describe('List of inventor names'),
+  /** Assignee/owner */
+  assignee: z.string().optional().describe('Patent assignee or owner'),
+  /** Filing date */
+  filingDate: z.string().optional().describe('Filing date (YYYY-MM-DD)'),
+  /** Publication date */
+  publicationDate: z.string().optional().describe('Publication date (YYYY-MM-DD)'),
+  /** Patent office (USPTO, EPO, WIPO, etc.) */
+  patentOffice: z.string().optional().describe('Patent office'),
+  /** CPC classification codes */
+  cpcCodes: z.array(z.string()).optional().describe('CPC classification codes'),
+  /** Direct link to PDF */
+  pdfUrl: z.string().url().optional().describe('Direct link to patent PDF'),
+});
+
+/**
+ * Structured output schema for patent_search tool
+ */
+export const patentSearchOutputSchema = {
+  /** Array of patent results */
+  patents: z.array(patentResultSchema).describe('List of patent results'),
+  /** Original search query */
+  query: z.string().describe('The search query that was executed'),
+  /** Total results found */
+  totalResults: z.number().int().describe('Total patents matching query'),
+  /** Number of results returned */
+  resultCount: z.number().int().describe('Number of patents returned'),
+  /** Search type used */
+  searchType: z.enum(['prior_art', 'specific', 'landscape']).describe('Type of patent search'),
+  /** Data source */
+  source: z.literal('Google Patents').describe('Data source'),
+};
+
+/** Inferred type for patent result */
+export type PatentResultOutput = z.infer<typeof patentResultSchema>;
+
+/** Inferred type for patent_search structured output */
+export type PatentSearchOutput = {
+  patents: PatentResultOutput[];
+  query: string;
+  totalResults: number;
+  resultCount: number;
+  searchType: 'prior_art' | 'specific' | 'landscape';
+  source: 'Google Patents';
 };

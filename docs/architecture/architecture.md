@@ -27,10 +27,11 @@ The Google Researcher MCP Server is a backend service that implements the [Model
 -   **`google_search`**: Executes queries against the Google Search API. Supports recency filtering via `time_range` and advanced filters.
 -   **`google_image_search`**: Searches Google Images with filtering by size, type, color, and file format.
 -   **`google_news_search`**: Searches Google News with freshness filtering and date-based sorting.
--   **`scrape_page`**: Extracts text content from web pages, YouTube videos, and documents (PDF, DOCX, PPTX).
--   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, with quality scoring and ranking.
+-   **`scrape_page`**: Extracts text content from web pages, YouTube videos, and documents (PDF, DOCX, PPTX). Supports `max_length` and `mode: 'preview'` for content size control.
+-   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, with quality scoring and ranking. Includes size metadata and content truncation options.
 -   **`sequential_search`**: Tracks multi-step research state following the `sequential_thinking` pattern. Tracks steps, sources, knowledge gaps, and supports branching.
 -   **`academic_search`**: Searches academic papers via Google Custom Search API (filtered to arXiv, PubMed, IEEE, etc.) with pre-formatted citations (APA, MLA, BibTeX).
+-   **`patent_search`**: Searches Google Patents for prior art, FTO analysis, and patent landscaping. Supports filtering by patent office, assignee, inventor, and CPC code.
 
 The server also exposes:
 -   **MCP Resources**: Server state (recent searches, cache stats, configuration) via the Resources protocol.
@@ -77,6 +78,7 @@ graph TD
         NEWS[google_news_search]
         SEQ[sequential_search]
         ACAD[academic_search]
+        PAT[patent_search]
         YT[YouTube Transcript Extractor]
         QS[Quality Scoring]
     end
@@ -108,6 +110,7 @@ graph TD
     E -- Invokes --> NEWS
     E -- Invokes --> SEQ
     E -- Invokes --> ACAD
+    E -- Invokes --> PAT
 
     D -- Exposes --> RES
     D -- Exposes --> PROMPTS
@@ -123,12 +126,13 @@ graph TD
     IMG -- Calls --> M
     NEWS -- Calls --> M
     ACAD -- Calls --> M
+    PAT -- Calls --> M
     YT -- Calls --> P
 
     I -- Uses --> F
     I -- Uses --> G
 
-    F & G & I & IMG & NEWS & SEQ & ACAD & YT -- Use for caching --> J
+    F & G & I & IMG & NEWS & SEQ & ACAD & PAT & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
 
     style YT fill:#cce5ff,stroke:#333,stroke-width:2px

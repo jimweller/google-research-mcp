@@ -94,11 +94,33 @@ import {
   handleAcademicSearch,
   type AcademicSearchInput,
 } from "./tools/academicSearch.js";
+import {
+  patentSearchInputSchema,
+  patentSearchOutputSchema,
+  handlePatentSearch,
+  type PatentSearchInput,
+} from "./tools/patentSearch.js";
 import { TOOL_METADATA, getToolIcon, getToolMeta } from "./tools/toolMetadata.js";
 import {
   sequentialSearchOutputSchema as seqSearchSchema,
   academicSearchOutputSchema as acadSearchSchema,
+  patentSearchOutputSchema as patentSchema,
+  type PatentSearchOutput,
+  type SizeMetadataOutput,
+  type ContentPreviewOutput,
 } from "./schemas/outputSchemas.js";
+import {
+  truncateContent,
+  generatePreview,
+  generateSizeMetadata,
+  filterByKeywords,
+  extractQueryKeywords,
+  estimateTokens,
+  getSizeCategory,
+  type TruncationResult,
+  type ContentPreview,
+  type SizeMetadata,
+} from "./shared/contentSizeOptimization.js";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -851,9 +873,22 @@ function configureToolsAndResources(
         "scrape_page",
         {
             title: "Scrape Page",
-            description: "Extract text content from a specific URL you already have. Handles web pages (static and JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX). Use this when you have a specific URL to read. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.",
+            description: `Extract text content from a specific URL you already have. Handles web pages (static and JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX). Use this when you have a specific URL to read. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.
+
+**Content Size Control:**
+- max_length: Limit response size (default: no limit, uses server max of 50KB)
+- mode: 'full' returns content, 'preview' returns metadata + structure only
+
+**When to use preview mode:**
+- Check content size before fetching full content
+- Get page structure (headings) to decide which sections to read
+- Avoid context exhaustion with very large pages`,
             inputSchema: {
-                url: z.string().url().max(2048).describe("The URL to scrape. Supports: web pages (static HTML and JavaScript-rendered SPAs), YouTube videos (extracts transcript automatically), and documents (PDF, DOCX, PPTX - extracts text content).")
+                url: z.string().url().max(2048).describe("The URL to scrape. Supports: web pages (static HTML and JavaScript-rendered SPAs), YouTube videos (extracts transcript automatically), and documents (PDF, DOCX, PPTX - extracts text content)."),
+                max_length: z.number().int().min(1000).max(100000).optional()
+                    .describe("Maximum content length in characters. Content exceeding this will be truncated at natural breakpoints. Default: server max (50KB)."),
+                mode: z.enum(['full', 'preview']).default('full')
+                    .describe("'full' returns content (default), 'preview' returns metadata and structure without full content."),
             },
             outputSchema: scrapePageOutputSchema,
             annotations: {
@@ -862,11 +897,12 @@ function configureToolsAndResources(
                 openWorldHint: true
             }
         },
-        async ({ url }) => {
+        async ({ url, max_length, mode }) => {
             const traceId = randomUUID();
-            logger.info('scrape_page invoked', { traceId, url });
+            logger.info('scrape_page invoked', { traceId, url, max_length, mode });
             const result = await scrapePageFn({ url, traceId });
-            const textContent = result.content[0]?.text ?? '';
+            let textContent = result.content[0]?.text ?? '';
+            const originalLength = textContent.length;
 
             // Detect content type from URL
             let contentType: ScrapePageOutput['contentType'] = 'html';
@@ -900,18 +936,73 @@ function configureToolsAndResources(
                 };
             }
 
+            // Handle preview mode - return metadata without full content
+            if (mode === 'preview') {
+                const preview = generatePreview(url, textContent, metadata?.title || citation?.metadata.title);
+                const structuredContent: ScrapePageOutput = {
+                    url,
+                    content: '', // Empty in preview mode
+                    contentType,
+                    contentLength: originalLength,
+                    truncated: false,
+                    estimatedTokens: estimateTokens(textContent),
+                    sizeCategory: getSizeCategory(originalLength),
+                    metadata,
+                    citation,
+                    preview,
+                };
+
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: `Preview for ${url}:\n` +
+                              `- Content length: ${originalLength.toLocaleString()} characters\n` +
+                              `- Estimated tokens: ${estimateTokens(textContent).toLocaleString()}\n` +
+                              `- Size category: ${getSizeCategory(originalLength)}\n` +
+                              `- Headings: ${preview.headings.length}\n` +
+                              `\nExcerpt:\n${preview.excerpt}\n` +
+                              `\nHeadings:\n${preview.headings.map(h => '  '.repeat(h.level - 1) + h.text).join('\n') || '(none found)'}`
+                    }],
+                    structuredContent,
+                };
+            }
+
+            // Apply custom max_length if specified
+            let truncated = textContent.includes('[... CONTENT TRUNCATED FOR SIZE LIMIT ...]');
+            let finalOriginalLength: number | undefined;
+
+            if (max_length && textContent.length > max_length) {
+                const truncationResult = truncateContent(textContent, max_length, 'start');
+                textContent = truncationResult.content;
+                truncated = true;
+                finalOriginalLength = truncationResult.originalLength;
+                logger.info('Content truncated by user max_length', {
+                    traceId,
+                    originalLength: truncationResult.originalLength,
+                    truncatedTo: truncationResult.truncatedLength,
+                });
+            } else if (truncated) {
+                finalOriginalLength = originalLength;
+            }
+
             const structuredContent: ScrapePageOutput = {
                 url,
                 content: textContent,
                 contentType,
                 contentLength: textContent.length,
-                truncated: textContent.includes('[... CONTENT TRUNCATED FOR SIZE LIMIT ...]'),
+                truncated,
+                estimatedTokens: estimateTokens(textContent),
+                sizeCategory: getSizeCategory(textContent.length),
+                originalLength: finalOriginalLength,
                 metadata,
                 citation,
             };
 
             return {
-                content: result.content,
+                content: [{
+                    type: "text" as const,
+                    text: textContent,
+                }],
                 structuredContent,
             };
         }
@@ -922,12 +1013,25 @@ function configureToolsAndResources(
         "search_and_scrape",
         {
             title: "Search and Scrape",
-            description: "Best for research: searches Google AND retrieves content from top results in one call. Returns combined, deduplicated content with source attribution. Use this as your PRIMARY tool for answering questions that need web research. More efficient than calling google_search + scrape_page separately. Only use google_search alone when you just need URLs, or scrape_page alone when you already have a specific URL.",
+            description: `Best for research: searches Google AND retrieves content from top results in one call. Returns combined, deduplicated content with source attribution. Use this as your PRIMARY tool for answering questions that need web research. More efficient than calling google_search + scrape_page separately. Only use google_search alone when you just need URLs, or scrape_page alone when you already have a specific URL.
+
+**Content Size Control:**
+- max_length_per_source: Limit content per source (default: 50KB)
+- total_max_length: Limit total combined content (default: 300KB)
+- filter_by_query: Only include paragraphs containing query keywords
+
+**Response includes size metadata:** estimatedTokens, sizeCategory, truncated status.`,
             inputSchema: {
                 query: z.string().min(1).max(500).describe("Your research question or topic. Be specific for better results. Example: 'Python async best practices 2024' rather than just 'Python'."),
                 num_results: z.number().min(1).max(10).default(3).describe("Number of sources to fetch (1-10). Default 3 is good for most queries. Use 5-8 for comprehensive research, 1-2 for quick factual lookups."),
                 include_sources: z.boolean().default(true).describe("Include source URLs at the end for citation. Default true - recommended for transparency."),
                 deduplicate: z.boolean().default(true).describe("Remove duplicate content across sources. Default true - recommended to reduce noise when sources quote each other."),
+                max_length_per_source: z.number().int().min(1000).max(100000).optional()
+                    .describe("Maximum content length per source in characters. Default: 50KB."),
+                total_max_length: z.number().int().min(5000).max(500000).optional()
+                    .describe("Maximum total combined content length. Default: 300KB."),
+                filter_by_query: z.boolean().default(false)
+                    .describe("Filter to only include paragraphs containing query keywords. Reduces noise but may exclude relevant context."),
             },
             outputSchema: searchAndScrapeOutputSchema,
             annotations: {
@@ -936,7 +1040,7 @@ function configureToolsAndResources(
                 openWorldHint: true
             }
         },
-        async ({ query, num_results, include_sources, deduplicate }) => {
+        async ({ query, num_results, include_sources, deduplicate, max_length_per_source, total_max_length, filter_by_query }) => {
             const traceId = randomUUID();
             const trimmedQuery = query.trim();
             const startTime = Date.now();
@@ -988,11 +1092,47 @@ function configureToolsAndResources(
 
             const successfulScrapes: { url: string; content: string; citation?: Citation }[] = [];
             const allSources: SourceOutput[] = [];
+
+            // Extract keywords from query for filtering
+            const queryKeywords = filter_by_query ? extractQueryKeywords(trimmedQuery) : [];
+
+            // Effective per-source limit (use parameter or default)
+            const effectivePerSourceLimit = max_length_per_source ?? MAX_SCRAPE_CONTENT_SIZE;
+
             scrapeResults.forEach((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
-                        const content = result.value.result.content[0].text;
+                        let content = result.value.result.content[0].text;
                         const citation = result.value.result.citation;
+                        const originalContentLength = content.length;
+
+                        // Apply keyword filtering if enabled
+                        if (filter_by_query && queryKeywords.length > 0) {
+                            const filterResult = filterByKeywords(content, queryKeywords, 50);
+                            if (filterResult.includedParagraphs > 0) {
+                                content = filterResult.content;
+                                logger.debug('Content filtered by keywords', {
+                                    traceId,
+                                    url: sanitizeUrl(result.value.url).substring(0, 50),
+                                    included: filterResult.includedParagraphs,
+                                    excluded: filterResult.excludedParagraphs,
+                                });
+                            }
+                            // If no paragraphs match, keep original content
+                        }
+
+                        // Apply per-source truncation if content exceeds limit
+                        if (content.length > effectivePerSourceLimit) {
+                            const truncResult = truncateContent(content, effectivePerSourceLimit, 'start');
+                            content = truncResult.content;
+                            logger.debug('Source content truncated', {
+                                traceId,
+                                url: sanitizeUrl(result.value.url).substring(0, 50),
+                                originalLength: truncResult.originalLength,
+                                truncatedTo: truncResult.truncatedLength,
+                            });
+                        }
+
                         successfulScrapes.push({
                             url: result.value.url,
                             content,
@@ -1095,12 +1235,21 @@ function configureToolsAndResources(
                 finalCombined = combinedSections.join("\n\n---\n\n");
             }
 
-            if (finalCombined.length > MAX_RESEARCH_COMBINED_SIZE) {
-                const halfSize = Math.floor(MAX_RESEARCH_COMBINED_SIZE / 2);
-                finalCombined = finalCombined.substring(0, halfSize) +
-                               "\n\n[... CONTENT TRUNCATED FOR SIZE LIMITS ...]\n\n" +
-                               finalCombined.substring(finalCombined.length - halfSize);
-                logger.info('Combined content truncated', { traceId, originalLength: finalCombined.length, truncatedTo: MAX_RESEARCH_COMBINED_SIZE });
+            // Apply total content limit (use parameter or default)
+            const effectiveTotalLimit = total_max_length ?? MAX_RESEARCH_COMBINED_SIZE;
+            const originalCombinedLength = finalCombined.length;
+            let contentTruncated = false;
+
+            if (finalCombined.length > effectiveTotalLimit) {
+                const truncResult = truncateContent(finalCombined, effectiveTotalLimit, 'balanced');
+                finalCombined = truncResult.content;
+                contentTruncated = true;
+                logger.info('Combined content truncated', {
+                    traceId,
+                    originalLength: truncResult.originalLength,
+                    truncatedTo: truncResult.truncatedLength,
+                    limit: effectiveTotalLimit,
+                });
             }
 
             const sourcesList = include_sources
@@ -1113,13 +1262,29 @@ function configureToolsAndResources(
                 `Query: "${trimmedQuery}"`,
                 `URLs scraped: ${successfulScrapes.length}/${urls.length}`,
                 `Processing time: ${totalTime}ms`,
+                `Content size: ${finalCombined.length.toLocaleString()} chars (~${estimateTokens(finalCombined).toLocaleString()} tokens)`,
             ];
             if (dedupeStats) {
                 summaryLines.push(`Deduplication: ${dedupeStats.duplicatesRemoved} duplicates removed (${dedupeStats.reductionPercent}% reduction)`);
             }
+            if (contentTruncated) {
+                summaryLines.push(`Truncation: Content truncated from ${originalCombinedLength.toLocaleString()} to ${finalCombined.length.toLocaleString()} chars`);
+            }
+            if (filter_by_query) {
+                summaryLines.push(`Keyword filter: Applied (keywords: ${queryKeywords.join(', ')})`);
+            }
             if (errors.length > 0) {
                 summaryLines.push(`Errors: ${errors.length} (${errors.join('; ')})`);
             }
+
+            // Generate size metadata
+            const sizeMetadata: SizeMetadataOutput = {
+                contentLength: finalCombined.length,
+                estimatedTokens: estimateTokens(finalCombined),
+                truncated: contentTruncated,
+                originalLength: contentTruncated ? originalCombinedLength : undefined,
+                sizeCategory: getSizeCategory(finalCombined.length),
+            };
 
             // Build structured output
             const structuredContent: SearchAndScrapeOutput = {
@@ -1133,6 +1298,7 @@ function configureToolsAndResources(
                     duplicatesRemoved: dedupeStats?.duplicatesRemoved,
                     reductionPercent: dedupeStats?.reductionPercent,
                 },
+                sizeMetadata,
             };
 
             // Track search for resources
@@ -1598,6 +1764,61 @@ Ideal for current events, breaking news, and time-sensitive topics.
             logger.info('academic_search invoked', { traceId, query: params.query });
 
             const result = await handleAcademicSearch(params as AcademicSearchInput);
+
+            // Track the search
+            trackSearch({
+                query: params.query,
+                timestamp: new Date().toISOString(),
+                resultCount: result.structuredContent.resultCount,
+                traceId,
+                tool: 'google_search', // Use existing type
+            });
+
+            return result;
+        }
+    );
+
+    // ── patent_search Tool ─────────────────────────────────────────────────────
+
+    server.registerTool(
+        "patent_search",
+        {
+            title: "Patent Search",
+            description: `Search patents using Google Custom Search API (site:patents.google.com).
+
+**Best for:**
+- Prior art search before filing
+- Freedom to operate (FTO) analysis
+- Patent landscaping and competitive intelligence
+- Tracking innovation in specific domains
+
+**Features:**
+- Patent titles, numbers, abstracts
+- Inventors and assignees
+- Filing and publication dates
+- Direct links to Google Patents and PDFs
+- Filter by patent office (USPTO, EPO, WIPO, JPO, CNIPA, KIPO)
+- Filter by assignee, inventor, CPC code, year range
+
+**Search types:**
+- prior_art: Find related existing patents
+- specific: Look up specific patent(s)
+- landscape: Broad overview of a technology area
+
+**Note:** Uses same Google API credentials as other search tools.`,
+            inputSchema: patentSearchInputSchema,
+            outputSchema: patentSchema,
+            annotations: {
+                title: "Patent Search",
+                readOnlyHint: true,
+                openWorldHint: true,
+            },
+        },
+        async (params) => {
+            const traceId = randomUUID();
+            logger.info('patent_search invoked', { traceId, query: params.query, searchType: params.search_type });
+
+            const result = await handlePatentSearch(params as PatentSearchInput, traceId);
 
             // Track the search
             trackSearch({
