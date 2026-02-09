@@ -11,6 +11,11 @@ const isVerbose = process.argv.includes('--verbose') || process.argv.includes('-
 
 // Global cleanup before all tests
 beforeAll(async () => {
+  // Set up valid env vars for all tests (format-valid fake credentials)
+  // These are required by envValidator to pass format checks
+  process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'AIzaSyTEST_KEY_FOR_UNIT_TESTS_123456789';
+  process.env.GOOGLE_CUSTOM_SEARCH_ID = '123456789012345:testengine';
+
   // Clean up any stale locks from previous test runs
   await cleanupStaleLocks();
   await cleanupAllTestStorage();

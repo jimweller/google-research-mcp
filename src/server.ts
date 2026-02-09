@@ -20,7 +20,7 @@ import express from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import { readFileSync, existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -35,8 +35,19 @@ import { createOAuthMiddleware, OAuthMiddlewareOptions } from "./shared/oauthMid
 import { RobustYouTubeTranscriptExtractor, YouTubeTranscriptError, YouTubeTranscriptErrorType } from "./youtube/transcriptExtractor.js";
 import { validateUrlForSSRF, SSRFProtectionError, getSSRFOptionsFromEnv } from "./shared/urlValidator.js";
 import { logger } from "./shared/logger.js";
+import { deduplicateContent } from "./shared/contentDeduplication.js";
+import { parseDocument, isDocumentUrl, detectDocumentType, DocumentType } from "./documents/index.js";
+import {
+  googleSearchOutputSchema,
+  scrapePageOutputSchema,
+  searchAndScrapeOutputSchema,
+  type GoogleSearchOutput,
+  type ScrapePageOutput,
+  type SearchAndScrapeOutput,
+} from "./schemas/outputSchemas.js";
 import { CircuitBreaker, CircuitOpenError } from "./shared/circuitBreaker.js";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { validateEnvironmentOrExit, getValidatedEnvValue } from "./shared/envValidator.js";
 
 // ── Server Configuration Constants ─────────────────────────────
 
@@ -73,6 +84,46 @@ const SSRF_OPTIONS = getSSRFOptionsFromEnv();
 type Request = express.Request;
 type Response = express.Response;
 type NextFunction = express.NextFunction;
+
+/** OAuth token payload attached by middleware */
+interface OAuthTokenPayload {
+  sub: string;
+  iss: string;
+  aud: string | string[];
+  exp?: number;
+  iat?: number;
+  [key: string]: unknown;
+}
+
+/** Extended request with OAuth data attached by middleware */
+interface OAuthRequest extends Request {
+  oauth?: {
+    token: OAuthTokenPayload;
+    scopes: string[];
+    sub: string;
+  };
+}
+
+/** Text content item returned by tools */
+interface TextContent {
+  type: "text";
+  text: string;
+}
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns true if strings are equal, false otherwise.
+ */
+function secureCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  // If lengths differ, compare against self to maintain constant time
+  if (bufA.length !== bufB.length) {
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
 
 // Get the directory name in ES module scope
 const __filename = fileURLToPath(import.meta.url);
@@ -184,12 +235,9 @@ async function initializeGlobalInstances(
     eagerLoading: true,
   };
 
-  const encryptionKey = process.env.EVENT_STORE_ENCRYPTION_KEY;
+  // Encryption key format is validated by envValidator; getValidatedEnvValue throws if invalid
+  const encryptionKey = getValidatedEnvValue('EVENT_STORE_ENCRYPTION_KEY');
   if (encryptionKey) {
-    if (!/^[0-9a-fA-F]{64}$/.test(encryptionKey)) {
-      logger.error('EVENT_STORE_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Exiting.');
-      process.exit(1);
-    }
     const keyBuffer = Buffer.from(encryptionKey, 'hex');
     eventStoreOpts.encryption = {
       enabled: true,
@@ -300,34 +348,101 @@ function configureToolsAndResources(
         year: 'y1',
     };
 
-    const googleSearchFn = async ({
-        query,
-        num_results,
-        time_range,
-        traceId,
-    }: {
+    /**
+     * Advanced Google Search parameters for filtering and customization
+     */
+    interface GoogleSearchParams {
         query: string;
         num_results: number;
         time_range?: string;
         traceId?: string;
-    }) => {
-        const trimmedQuery = query.trim();
+        // Advanced filtering options (Google CSE API parameters)
+        siteSearch?: string;       // Limit results to a specific site
+        siteSearchFilter?: 'i' | 'e'; // 'i' = include, 'e' = exclude
+        exactTerms?: string;       // Required exact phrase in results
+        excludeTerms?: string;     // Terms to exclude from results
+        language?: string;         // Language code (e.g., 'lang_en')
+        country?: string;          // Country restriction (e.g., 'countryUS')
+        safe?: 'off' | 'medium' | 'high'; // Safe search level
+    }
+
+    /**
+     * Builds a Google Custom Search API URL with all parameters
+     */
+    function buildGoogleSearchUrl(params: GoogleSearchParams): string {
+        const urlParams = new URLSearchParams({
+            key: process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!,
+            cx: process.env.GOOGLE_CUSTOM_SEARCH_ID!,
+            q: params.query,
+            num: String(params.num_results),
+        });
+
+        // Recency filtering
+        if (params.time_range && TIME_RANGE_MAP[params.time_range]) {
+            urlParams.set('dateRestrict', TIME_RANGE_MAP[params.time_range]);
+        }
+
+        // Site restriction
+        if (params.siteSearch) {
+            urlParams.set('siteSearch', params.siteSearch);
+            if (params.siteSearchFilter) {
+                urlParams.set('siteSearchFilter', params.siteSearchFilter);
+            }
+        }
+
+        // Exact phrase matching
+        if (params.exactTerms) {
+            urlParams.set('exactTerms', params.exactTerms);
+        }
+
+        // Term exclusion
+        if (params.excludeTerms) {
+            urlParams.set('excludeTerms', params.excludeTerms);
+        }
+
+        // Language restriction
+        if (params.language) {
+            urlParams.set('lr', params.language);
+        }
+
+        // Country restriction
+        if (params.country) {
+            urlParams.set('cr', params.country);
+        }
+
+        // Safe search level
+        if (params.safe) {
+            urlParams.set('safe', params.safe);
+        }
+
+        return `https://www.googleapis.com/customsearch/v1?${urlParams.toString()}`;
+    }
+
+    const googleSearchFn = async (params: GoogleSearchParams) => {
+        const trimmedQuery = params.query.trim();
+        const searchParams = { ...params, query: trimmedQuery };
+
+        // Build cache key from all filter parameters to avoid cross-contamination
+        const cacheArgs = {
+            query: trimmedQuery,
+            num_results: params.num_results,
+            time_range: params.time_range,
+            siteSearch: params.siteSearch,
+            siteSearchFilter: params.siteSearchFilter,
+            exactTerms: params.exactTerms,
+            excludeTerms: params.excludeTerms,
+            language: params.language,
+            country: params.country,
+            safe: params.safe,
+        };
+
         // Use the globally initialized cache instance directly
         return globalCacheInstance.getOrCompute(
             'googleSearch',
-            { query: trimmedQuery, num_results, time_range },
+            cacheArgs,
             async () => {
-                logger.debug(`Cache MISS for googleSearch`, { traceId, query: trimmedQuery, num_results, time_range });
-                const key = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY!;
-                const cx = process.env.GOOGLE_CUSTOM_SEARCH_ID!;
-                let url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(
-                    trimmedQuery
-                )}&num=${num_results}`;
-
-                // Append dateRestrict for recency filtering
-                if (time_range && TIME_RANGE_MAP[time_range]) {
-                    url += `&dateRestrict=${TIME_RANGE_MAP[time_range]}`;
-                }
+                logger.debug(`Cache MISS for googleSearch`, { traceId: params.traceId, ...cacheArgs });
+                const url = buildGoogleSearchUrl(searchParams);
 
                 // Circuit breaker + timeout protection for the search API call
                 const resp = await googleSearchCircuit.execute(async () => {
@@ -493,6 +608,29 @@ function configureToolsAndResources(
                             result.error!.originalError
                         );
                     }
+                } else if (isDocumentUrl(url)) {
+                    // Document parsing: PDF, DOCX, PPTX
+                    logger.info('Parsing document', { traceId, url: sanitizeUrl(url) });
+                    const docResult = await parseDocument(url, { maxFileSize: 10 * 1024 * 1024, timeout: 30_000 });
+
+                    if (docResult.success && docResult.content) {
+                        const meta = docResult.metadata;
+                        const metaInfo = meta
+                            ? `\n\n[Document: ${docResult.documentType.toUpperCase()}${meta.pageCount ? `, ${meta.pageCount} pages` : ''}${meta.title ? `, "${meta.title}"` : ''}]`
+                            : '';
+                        text = docResult.content + metaInfo;
+                        logger.info('Document parsed successfully', {
+                            traceId,
+                            documentType: docResult.documentType,
+                            contentLength: text.length,
+                            pageCount: meta?.pageCount,
+                        });
+                    } else {
+                        // Document parsing failed, return error message
+                        const errorMsg = docResult.error?.message ?? 'Unknown error parsing document';
+                        text = `Failed to parse document: ${errorMsg}`;
+                        logger.warn('Document parsing failed', { traceId, url: sanitizeUrl(url), error: errorMsg });
+                    }
                 } else {
                     // Circuit breaker + tiered scraping: fast static HTML first, JS rendering fallback
                     text = await webScrapingCircuit.execute(async () => {
@@ -529,64 +667,150 @@ function configureToolsAndResources(
         return result;
     };
 
-    // 2) Register each tool with the MCP server
-    server.tool(
+    // 2) Register each tool with the MCP server using registerTool (with outputSchema)
+    server.registerTool(
         "google_search",
         {
-            query: z.string().min(1).max(500).describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
-            num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage."),
-            time_range: z.enum(['day', 'week', 'month', 'year']).optional().describe("Restrict results to a recent time range. 'day' = last 24 hours, 'week' = last 7 days, 'month' = last 30 days, 'year' = last 365 days. Omit for no time restriction.")
-        },
-        {
             title: "Google Search",
-            readOnlyHint: true,
-            openWorldHint: true
+            description: "Search the web using Google Custom Search API. Returns a list of URLs matching the query.",
+            inputSchema: {
+                query: z.string().min(1).max(500).describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
+                num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage."),
+                time_range: z.enum(['day', 'week', 'month', 'year']).optional().describe("Restrict results to a recent time range. 'day' = last 24 hours, 'week' = last 7 days, 'month' = last 30 days, 'year' = last 365 days. Omit for no time restriction."),
+                // Advanced filtering options (Google CSE API parameters)
+                site_search: z.string().max(100).optional().describe("Limit results to a specific site (e.g., 'github.com', 'stackoverflow.com'). Useful for domain-specific research."),
+                site_search_filter: z.enum(['include', 'exclude']).optional().describe("Whether to include or exclude results from site_search. 'include' (default) shows only results from the site, 'exclude' removes results from the site."),
+                exact_terms: z.string().max(200).optional().describe("Required exact phrase that must appear in all results. Useful for finding specific quotes or technical terms."),
+                exclude_terms: z.string().max(200).optional().describe("Terms to exclude from search results. Useful for filtering out irrelevant topics. Separate multiple terms with spaces."),
+                language: z.string().regex(/^lang_[a-z]{2}$/).optional().describe("Restrict results to a specific language. Format: 'lang_XX' where XX is ISO 639-1 code (e.g., 'lang_en' for English, 'lang_es' for Spanish, 'lang_fr' for French)."),
+                country: z.string().regex(/^country[A-Z]{2}$/).optional().describe("Restrict results to a specific country. Format: 'countryXX' where XX is ISO 3166-1 alpha-2 code (e.g., 'countryUS' for United States, 'countryGB' for United Kingdom)."),
+                safe: z.enum(['off', 'medium', 'high']).optional().describe("Safe search filtering level. 'off' = no filtering, 'medium' = moderate filtering, 'high' = strict filtering. Defaults to Google's account settings if omitted.")
+            },
+            outputSchema: googleSearchOutputSchema,
+            annotations: {
+                title: "Google Search",
+                readOnlyHint: true,
+                openWorldHint: true
+            }
         },
-        async ({ query, num_results = 5, time_range }) => {
+        async ({ query, num_results = 5, time_range, site_search, site_search_filter, exact_terms, exclude_terms, language, country, safe }) => {
             const traceId = randomUUID();
-            logger.info('google_search invoked', { traceId, query, num_results, time_range });
-            const content = await googleSearchFn({ query, num_results, time_range, traceId });
-            return { content };
+            logger.info('google_search invoked', { traceId, query, num_results, time_range, site_search, exact_terms });
+
+            const content = await googleSearchFn({
+                query,
+                num_results,
+                time_range,
+                traceId,
+                siteSearch: site_search,
+                siteSearchFilter: site_search_filter === 'include' ? 'i' : site_search_filter === 'exclude' ? 'e' : undefined,
+                exactTerms: exact_terms,
+                excludeTerms: exclude_terms,
+                language,
+                country,
+                safe,
+            });
+
+            // Extract URLs from content for structured output
+            const urls = content.map(c => c.text);
+
+            // Return both content (backward compatible) and structuredContent (new)
+            const structuredContent: GoogleSearchOutput = {
+                urls,
+                query,
+                resultCount: urls.length,
+            };
+
+            return {
+                content,
+                structuredContent,
+            };
         }
     );
 
-    server.tool(
+    server.registerTool(
         "scrape_page",
         {
-            url: z.string().url().max(2048).describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
-        },
-        {
             title: "Scrape Page",
-            readOnlyHint: true,
-            openWorldHint: true
+            description: "Scrape content from a web page, YouTube video transcript, or document (PDF, DOCX, PPTX).",
+            inputSchema: {
+                url: z.string().url().max(2048).describe("The URL to scrape. Supports HTTP/HTTPS web pages and YouTube video URLs (youtube.com/watch?v= or youtu.be/ formats). YouTube URLs automatically extract transcripts when available.")
+            },
+            outputSchema: scrapePageOutputSchema,
+            annotations: {
+                title: "Scrape Page",
+                readOnlyHint: true,
+                openWorldHint: true
+            }
         },
         async ({ url }) => {
             const traceId = randomUUID();
             logger.info('scrape_page invoked', { traceId, url });
             const result = await scrapePageFn({ url, traceId });
-            return { content: result };
+            const textContent = result[0]?.text ?? '';
+
+            // Detect content type from URL
+            let contentType: ScrapePageOutput['contentType'] = 'html';
+            const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})(?:[&#?]|$)/);
+            if (ytMatch) {
+                contentType = 'youtube';
+            } else if (isDocumentUrl(url)) {
+                const docType = detectDocumentType(url);
+                if (docType === DocumentType.PDF) contentType = 'pdf';
+                else if (docType === DocumentType.DOCX) contentType = 'docx';
+                else if (docType === DocumentType.PPTX) contentType = 'pptx';
+            }
+
+            // Extract metadata from content if it's a document
+            let metadata: ScrapePageOutput['metadata'];
+            const docMetaMatch = textContent.match(/\[Document: ([A-Z]+)(?:, (\d+) pages)?(?:, "([^"]+)")?\]$/);
+            if (docMetaMatch) {
+                metadata = {};
+                if (docMetaMatch[2]) metadata.pageCount = parseInt(docMetaMatch[2], 10);
+                if (docMetaMatch[3]) metadata.title = docMetaMatch[3];
+            }
+
+            const structuredContent: ScrapePageOutput = {
+                url,
+                content: textContent,
+                contentType,
+                contentLength: textContent.length,
+                truncated: textContent.includes('[... CONTENT TRUNCATED FOR SIZE LIMIT ...]'),
+                metadata,
+            };
+
+            return {
+                content: result,
+                structuredContent,
+            };
         }
     );
 
     // 3) Composite tool: search_and_scrape
-    server.tool(
+    server.registerTool(
         "search_and_scrape",
         {
-            query: z.string().min(1).max(500).describe("The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources."),
-            num_results: z.number().min(1).max(10).default(3).describe("Number of URLs to search for and scrape (1-10). More sources provide broader coverage but increase latency."),
-            include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs at the end of the output."),
-        },
-        {
             title: "Search and Scrape",
-            readOnlyHint: true,
-            openWorldHint: true
+            description: "Search Google and scrape the top results, combining content from multiple sources.",
+            inputSchema: {
+                query: z.string().min(1).max(500).describe("The search query. Results are fetched from Google and the top pages are scraped. Use specific queries for more relevant sources."),
+                num_results: z.number().min(1).max(10).default(3).describe("Number of URLs to search for and scrape (1-10). More sources provide broader coverage but increase latency."),
+                include_sources: z.boolean().default(true).describe("When true, appends a numbered list of source URLs at the end of the output."),
+                deduplicate: z.boolean().default(true).describe("When true (default), removes duplicate and near-duplicate content across sources. Reduces redundancy when multiple sources quote the same material. Set to false for raw unprocessed content."),
+            },
+            outputSchema: searchAndScrapeOutputSchema,
+            annotations: {
+                title: "Search and Scrape",
+                readOnlyHint: true,
+                openWorldHint: true
+            }
         },
-        async ({ query, num_results, include_sources }) => {
+        async ({ query, num_results, include_sources, deduplicate }) => {
             const traceId = randomUUID();
             const trimmedQuery = query.trim();
             const startTime = Date.now();
             const errors: string[] = [];
-            let searchResults: any[] = [];
+            let searchResults: TextContent[] = [];
 
             try {
                 logger.info('search_and_scrape: searching', { traceId, query: trimmedQuery, num_results });
@@ -632,20 +856,35 @@ function configureToolsAndResources(
             const scrapeResults = await Promise.allSettled(scrapePromises);
 
             const successfulScrapes: { url: string; content: string }[] = [];
+            const allSources: SearchAndScrapeOutput['sources'] = [];
             scrapeResults.forEach((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
+                        const content = result.value.result[0].text;
                         successfulScrapes.push({
                             url: result.value.url,
-                            content: result.value.result[0].text,
+                            content,
+                        });
+                        allSources.push({
+                            url: result.value.url,
+                            success: true,
+                            contentLength: content.length,
                         });
                     } else {
                         errors.push(result.value.error);
+                        allSources.push({
+                            url: result.value.url,
+                            success: false,
+                        });
                     }
                 } else {
                     const errorMsg = `Scrape promise rejected for URL ${index + 1}: ${result.reason}`;
                     errors.push(errorMsg);
                     logger.warn(errorMsg, { traceId });
+                    allSources.push({
+                        url: urls[index],
+                        success: false,
+                    });
                 }
             });
 
@@ -661,18 +900,40 @@ function configureToolsAndResources(
                 };
             }
 
-            // Combine scraped content with source headers
-            const combinedSections = successfulScrapes.map((scrape, index) =>
-                `=== Source ${index + 1}: ${scrape.url} ===\n${scrape.content}`
-            );
-            let finalCombined = combinedSections.join("\n\n---\n\n");
+            // Apply deduplication if enabled
+            let finalCombined: string;
+            let dedupeStats: { duplicatesRemoved: number; reductionPercent: number } | undefined;
+
+            if (deduplicate) {
+                const sources = successfulScrapes.map(s => ({
+                    url: s.url,
+                    content: s.content,
+                }));
+                const dedupeResult = deduplicateContent(sources, {
+                    minParagraphLength: 50,
+                    similarityThreshold: 0.85,
+                    preserveStructure: true,
+                });
+                finalCombined = dedupeResult.content;
+                dedupeStats = {
+                    duplicatesRemoved: dedupeResult.stats.duplicatesRemoved,
+                    reductionPercent: dedupeResult.stats.reductionPercent,
+                };
+                logger.info('Content deduplicated', { traceId, ...dedupeResult.stats });
+            } else {
+                // Combine scraped content with source headers (legacy behavior)
+                const combinedSections = successfulScrapes.map((scrape, index) =>
+                    `=== Source ${index + 1}: ${scrape.url} ===\n${scrape.content}`
+                );
+                finalCombined = combinedSections.join("\n\n---\n\n");
+            }
 
             if (finalCombined.length > MAX_RESEARCH_COMBINED_SIZE) {
                 const halfSize = Math.floor(MAX_RESEARCH_COMBINED_SIZE / 2);
                 finalCombined = finalCombined.substring(0, halfSize) +
                                "\n\n[... CONTENT TRUNCATED FOR SIZE LIMITS ...]\n\n" +
                                finalCombined.substring(finalCombined.length - halfSize);
-                logger.info('Combined content truncated', { traceId, from: combinedSections.join('').length, to: finalCombined.length });
+                logger.info('Combined content truncated', { traceId, originalLength: finalCombined.length, truncatedTo: MAX_RESEARCH_COMBINED_SIZE });
             }
 
             const sourcesList = include_sources
@@ -680,21 +941,39 @@ function configureToolsAndResources(
                 : '';
 
             const totalTime = Date.now() - startTime;
-            const summary = [
+            const summaryLines = [
                 `\n\n--- Summary ---`,
                 `Query: "${trimmedQuery}"`,
                 `URLs scraped: ${successfulScrapes.length}/${urls.length}`,
                 `Processing time: ${totalTime}ms`,
             ];
-            if (errors.length > 0) {
-                summary.push(`Errors: ${errors.length} (${errors.join('; ')})`);
+            if (dedupeStats) {
+                summaryLines.push(`Deduplication: ${dedupeStats.duplicatesRemoved} duplicates removed (${dedupeStats.reductionPercent}% reduction)`);
             }
+            if (errors.length > 0) {
+                summaryLines.push(`Errors: ${errors.length} (${errors.join('; ')})`);
+            }
+
+            // Build structured output
+            const structuredContent: SearchAndScrapeOutput = {
+                query: trimmedQuery,
+                sources: allSources,
+                combinedContent: finalCombined,
+                summary: {
+                    urlsSearched: urls.length,
+                    urlsScraped: successfulScrapes.length,
+                    processingTimeMs: totalTime,
+                    duplicatesRemoved: dedupeStats?.duplicatesRemoved,
+                    reductionPercent: dedupeStats?.reductionPercent,
+                },
+            };
 
             return {
                 content: [{
                     type: "text" as const,
-                    text: finalCombined + sourcesList + summary.join('\n')
-                }]
+                    text: finalCombined + sourcesList + summaryLines.join('\n')
+                }],
+                structuredContent,
             };
         }
     );
@@ -744,22 +1023,8 @@ export async function createAppAndHttpTransport(
   }
 
   // ─── 0️⃣ ENVIRONMENT VALIDATION & CORS SETUP ─────────────────────────────────────
-  /**
- * Check for required environment variables and configure CORS settings
- *
- * The server requires the following environment variables:
- * - GOOGLE_CUSTOM_SEARCH_API_KEY: For Google search functionality
- * - GOOGLE_CUSTOM_SEARCH_ID: The custom search engine ID
- */
-for (const key of [
-    "GOOGLE_CUSTOM_SEARCH_API_KEY",
-    "GOOGLE_CUSTOM_SEARCH_ID",
-]) {
-    if (!process.env[key]) {
-        logger.error(`Missing required env var ${key}`);
-        process.exit(1);
-    }
-}
+  // Validate all environment variables at startup with clear, actionable error messages
+  validateEnvironmentOrExit();
 const ALLOWED_ORIGINS =
 process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
 
@@ -782,7 +1047,7 @@ process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || ["*"];
   app.use(rateLimit({
     windowMs: rateLimitWindowMs,
     max: rateLimitMax,
-    keyGenerator: (req: Request) => (req as any).oauth?.sub ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
+    keyGenerator: (req: Request) => (req as OAuthRequest).oauth?.sub ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req: Request, res: Response) => {
@@ -1024,7 +1289,8 @@ app.post("/mcp/cache-invalidate", (req: Request, res: Response) => {
     }
 
     const apiKey = req.headers["x-api-key"];
-    if (apiKey !== expectedKey) {
+    if (typeof apiKey !== 'string' || !secureCompare(apiKey, expectedKey)) {
+        logger.warn('Unauthorized cache invalidation attempt', { ip: req.ip });
         res.status(401).json({ error: "Unauthorized" });
         return;
     }
@@ -1068,7 +1334,8 @@ app.post("/mcp/cache-persist", async (req: Request, res: Response) => {
    return;
  }
  const apiKey = req.headers["x-api-key"];
- if (apiKey !== expectedKey) {
+ if (typeof apiKey !== 'string' || !secureCompare(apiKey, expectedKey)) {
+   logger.warn('Unauthorized cache persist attempt', { ip: req.ip });
    res.status(401).json({ error: "Unauthorized" });
    return;
  }
@@ -1146,7 +1413,7 @@ app.get("/mcp/oauth-token-info",
   })) as express.RequestHandler,
   (req: Request, res: Response) => {
   // The OAuth middleware will have attached the token and scopes to the request
-  const oauth = (req as any).oauth;
+  const oauth = (req as OAuthRequest).oauth;
 
   res.json({
     token: {

@@ -277,7 +277,7 @@ describe('Server Core Functionality', () => {
       const { createAppAndHttpTransport } = await import('./server.js');
 
       // Set CACHE_ADMIN_KEY for tests
-      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key-1234';
 
       const instances = createTestInstances(paths);
       testCache = instances.cache;
@@ -295,7 +295,7 @@ describe('Server Core Functionality', () => {
       // Test cache invalidation with correct API key
       const response2 = await supertest(app)
         .post('/mcp/cache-invalidate')
-        .set('x-api-key', 'test-admin-key')
+        .set('x-api-key', 'test-admin-key-1234')
         .send({ namespace: 'test', args: {} });
 
       expect(response2.status).toBe(200);
@@ -306,7 +306,7 @@ describe('Server Core Functionality', () => {
       const { createAppAndHttpTransport } = await import('./server.js');
 
       // Set CACHE_ADMIN_KEY for tests
-      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key-1234';
 
       const instances = createTestInstances(paths);
       testCache = instances.cache;
@@ -317,7 +317,7 @@ describe('Server Core Functionality', () => {
       // Test cache clearing
       const response = await supertest(app)
         .post('/mcp/cache-invalidate')
-        .set('x-api-key', 'test-admin-key')
+        .set('x-api-key', 'test-admin-key-1234')
         .send({}); // Empty body should clear entire cache
 
       expect(response.status).toBe(200);
@@ -388,10 +388,6 @@ describe('Server Core Functionality', () => {
 
       delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
 
-      // Mock process.exit to prevent actual exit
-      const originalExit = process.exit;
-      process.exit = jest.fn() as any;
-
       try {
         const { createAppAndHttpTransport } = await import('./server.js');
 
@@ -399,14 +395,13 @@ describe('Server Core Functionality', () => {
         testCache = instances.cache;
         testEventStore = instances.eventStore;
 
-        await createAppAndHttpTransport(testCache, testEventStore);
-
-        // Should have called process.exit(1) due to missing env var
-        expect(process.exit).toHaveBeenCalledWith(1);
+        // In test environment, this should throw EnvironmentValidationError
+        await expect(
+          createAppAndHttpTransport(testCache, testEventStore)
+        ).rejects.toThrow('Environment validation failed');
       } finally {
-        // Restore environment variables and process.exit
+        // Restore environment variables
         Object.assign(process.env, originalKeys);
-        process.exit = originalExit;
       }
     });
 
@@ -433,7 +428,7 @@ describe('Server Core Functionality', () => {
       const { createAppAndHttpTransport } = await import('./server.js');
 
       // Set CACHE_ADMIN_KEY for tests
-      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key-1234';
 
       // Instead of testing error case, test the success case since the error handling
       // might be more complex due to global cache usage
@@ -445,7 +440,7 @@ describe('Server Core Functionality', () => {
 
       const response = await supertest(app)
         .post('/mcp/cache-persist')
-        .set('x-api-key', 'test-admin-key');
+        .set('x-api-key', 'test-admin-key-1234');
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Cache persisted successfully');

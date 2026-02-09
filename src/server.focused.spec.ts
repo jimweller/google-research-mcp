@@ -153,22 +153,17 @@ describe('Focused Server Coverage Tests', () => {
       const originalKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
       delete process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
 
-      // Mock process.exit to prevent actual exit
-      const originalExit = process.exit;
-      const mockExit = jest.fn();
-      (process as any).exit = mockExit;
-
       try {
         const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
         await initializeGlobalInstances(paths.cachePath, paths.eventPath);
-        await createAppAndHttpTransport(testCache, testEventStore);
-        
-        // Should have called process.exit(1)
-        expect(mockExit).toHaveBeenCalledWith(1);
+
+        // In test environment, this should throw EnvironmentValidationError
+        await expect(
+          createAppAndHttpTransport(testCache, testEventStore)
+        ).rejects.toThrow('Environment validation failed');
       } finally {
         // Restore
         process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = originalKey;
-        process.exit = originalExit;
       }
     });
   });

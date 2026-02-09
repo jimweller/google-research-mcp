@@ -53,7 +53,7 @@ describe('Enhanced Tool Descriptions - Server Integration', () => {
 
   beforeAll(async () => {
     // Setup test environment
-    setupTestEnv({ CACHE_ADMIN_KEY: 'test-admin-key' });
+    setupTestEnv({ CACHE_ADMIN_KEY: 'test-admin-key-1234' });
 
     // Ensure test storage directory exists
     await ensureTestStorageDirs(paths);
@@ -161,7 +161,7 @@ describe('Enhanced Tool Descriptions - Server Integration', () => {
       // Test cache persistence endpoint (requires auth)
       const response = await supertest(app)
         .post('/mcp/cache-persist')
-        .set('x-api-key', 'test-admin-key')
+        .set('x-api-key', 'test-admin-key-1234')
         .expect(200);
 
       expect(response.body).toHaveProperty('success', true);

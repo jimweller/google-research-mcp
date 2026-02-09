@@ -389,7 +389,7 @@ describe('Targeted Server Coverage Tests', () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
 
       // Set CACHE_ADMIN_KEY for tests
-      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key-1234';
 
       await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
@@ -397,7 +397,7 @@ describe('Targeted Server Coverage Tests', () => {
       // Test cache invalidation with API key
       const response = await supertest(app)
         .post('/mcp/cache-invalidate')
-        .set('x-api-key', 'test-admin-key')
+        .set('x-api-key', 'test-admin-key-1234')
         .send({ namespace: 'test', args: { key: 'value' } });
 
       expect(response.status).toBe(200);
@@ -408,7 +408,7 @@ describe('Targeted Server Coverage Tests', () => {
       const { initializeGlobalInstances, createAppAndHttpTransport } = await import('./server.js');
 
       // Set CACHE_ADMIN_KEY for tests
-      process.env.CACHE_ADMIN_KEY = 'test-admin-key';
+      process.env.CACHE_ADMIN_KEY = 'test-admin-key-1234';
 
       await initializeGlobalInstances(paths.cachePath, paths.eventPath);
       const { app } = await createAppAndHttpTransport(testCache, testEventStore);
@@ -416,7 +416,7 @@ describe('Targeted Server Coverage Tests', () => {
       // Test both POST and GET cache persistence endpoints (now require auth)
       const postResponse = await supertest(app)
         .post('/mcp/cache-persist')
-        .set('x-api-key', 'test-admin-key');
+        .set('x-api-key', 'test-admin-key-1234');
       expect(postResponse.status).toBe(200);
       expect(postResponse.body.success).toBe(true);
     });

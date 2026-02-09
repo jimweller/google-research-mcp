@@ -69,9 +69,12 @@ export async function cleanupTestStorage(paths: TestStoragePaths): Promise<void>
 
 // ── Environment variables ──────────────────────────────────────
 
+// Use valid formats that pass envValidator checks (these are fake but format-valid)
+// API key: AIzaSy prefix + 33 alphanumeric/dash/underscore chars = 39 total
+// Search ID: 10-50 alphanumeric chars with optional colons
 const TEST_ENV_VARS: Record<string, string> = {
-  GOOGLE_CUSTOM_SEARCH_API_KEY: 'test-api-key',
-  GOOGLE_CUSTOM_SEARCH_ID: 'test-search-id',
+  GOOGLE_CUSTOM_SEARCH_API_KEY: 'AIzaSyTEST_KEY_FOR_UNIT_TESTS_123456789',
+  GOOGLE_CUSTOM_SEARCH_ID: '123456789012345:testengine',
 };
 
 /**
