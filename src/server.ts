@@ -814,7 +814,18 @@ function configureToolsAndResources(
         "google_search",
         {
             title: "Google Search",
-            description: "Search the web and get a list of relevant URLs. Use this when you need to FIND sources but will process them yourself, or when you only need URLs without content. For research that needs actual page content, use search_and_scrape instead - it's more efficient than calling google_search + scrape_page separately. Results are cached for 30 minutes.",
+            description: `Search the web using Google Custom Search API. Returns a list of URLs with titles and snippets.
+
+**When to use:**
+- You need URLs to process yourself (e.g., selective scraping)
+- You only need links without full content
+- You want to filter/choose which URLs to scrape
+
+**When to use search_and_scrape instead:**
+- You need actual page content for research
+- You want content from multiple sources combined
+
+**Caching:** Results cached for 30 minutes.`,
             inputSchema: {
                 query: z.string().min(1).max(500).describe("The search query string. Use natural language or specific keywords for better results. More specific queries yield better results and more relevant sources."),
                 num_results: z.number().min(1).max(10).default(5).describe("Number of search results to return (1-10). Higher numbers increase processing time and API costs. Use 3-5 for quick research, 8-10 for comprehensive coverage."),
@@ -883,18 +894,26 @@ function configureToolsAndResources(
         "scrape_page",
         {
             title: "Scrape Page (+ YouTube, PDF, DOCX, PPTX)",
-            description: `Extract text content from a URL. Automatically handles: web pages (static + JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX - extracts text).
+            description: `Extract text content from a URL. Automatically handles: web pages (static + JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX).
 
-Use this when you already have a specific URL. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.
+**When to use:**
+- You already have a specific URL to extract content from
+- Need content from YouTube videos, PDFs, or Office documents
+- Want to check page structure before fetching full content (preview mode)
 
-**Content Size Control:**
-- max_length: Limit response size (default: no limit, uses server max of 50KB)
+**When to use search_and_scrape instead:**
+- Researching a topic across multiple sources
+
+**Content size control:**
+- max_length: Limit response size (default: server max of 50KB)
 - mode: 'full' returns content, 'preview' returns metadata + structure only
 
-**When to use preview mode:**
+**Preview mode benefits:**
 - Check content size before fetching full content
 - Get page structure (headings) to decide which sections to read
-- Avoid context exhaustion with very large pages`,
+- Avoid context exhaustion with very large pages
+
+**Caching:** Results cached for 1 hour.`,
             inputSchema: {
                 url: z.string().url().max(2048).describe("The URL to scrape. Supports: web pages (static HTML and JavaScript-rendered SPAs), YouTube videos (extracts transcript automatically), and documents (PDF, DOCX, PPTX - extracts text content)."),
                 max_length: z.number().int().min(1000).max(100000).optional()
@@ -1025,14 +1044,23 @@ Use this when you already have a specific URL. For researching a topic across mu
         "search_and_scrape",
         {
             title: "Search and Scrape",
-            description: `Best for research: searches Google AND retrieves content from top results in one call. Returns combined, deduplicated content with source attribution. Use this as your PRIMARY tool for answering questions that need web research. More efficient than calling google_search + scrape_page separately. Only use google_search alone when you just need URLs, or scrape_page alone when you already have a specific URL.
+            description: `Search Google AND retrieve content from top results in one call. Returns combined, deduplicated content with source attribution.
 
-**Content Size Control:**
+**When to use:**
+- Primary tool for answering questions that need web research
+- Need content from multiple sources combined
+- More efficient than calling google_search + scrape_page separately
+
+**When to use other tools instead:**
+- google_search: When you only need URLs without content
+- scrape_page: When you already have a specific URL
+
+**Content size control:**
 - max_length_per_source: Limit content per source (default: 50KB)
 - total_max_length: Limit total combined content (default: 300KB)
 - filter_by_query: Only include paragraphs containing query keywords
 
-**Response includes size metadata:** estimatedTokens, sizeCategory, truncated status.`,
+**Caching:** Search results cached for 30 minutes, scraped pages for 1 hour.`,
             inputSchema: {
                 query: z.string().min(1).max(500).describe("Your research question or topic. Be specific for better results. Example: 'Python async best practices 2024' rather than just 'Python'."),
                 num_results: z.number().min(1).max(10).default(3).describe("Number of sources to fetch (1-10). Default 3 is good for most queries. Use 5-8 for comprehensive research, 1-2 for quick factual lookups."),
@@ -1377,13 +1405,17 @@ Use this when you already have a specific URL. For researching a topic across mu
             title: "Google Image Search",
             description: `Search for images using Google Custom Search API. Returns image URLs, thumbnails, dimensions, and source page URLs.
 
-**Best for:** Finding visual content — photos, illustrations, graphics. For text-based web research, use search_and_scrape instead.
+**When to use:**
+- Finding visual content — photos, illustrations, graphics, diagrams
+- Need specific image formats, sizes, or color types
 
 **Key parameters:**
 - size: huge, large, medium, small
 - type: clipart, face, lineart, photo, animated
 - color_type: color, gray, mono, trans (transparent)
-- file_type: jpg, gif, png, svg, webp`,
+- file_type: jpg, gif, png, svg, webp
+
+**Caching:** Results cached for 30 minutes.`,
             inputSchema: {
                 query: z.string().min(1).max(500)
                     .describe('The image search query'),
@@ -1560,14 +1592,22 @@ Use this when you already have a specific URL. For researching a topic across mu
         "google_news_search",
         {
             title: "Google News Search",
-            description: `Search for recent news articles with freshness filters and date sorting. Ideal for current events, breaking news, and time-sensitive topics.
+            description: `Search for recent news articles with freshness filters and date sorting.
 
-**Best for:** Finding recent news. For general web research or reading full articles, use search_and_scrape or scrape_page.
+**When to use:**
+- Current events, breaking news, time-sensitive topics
+- Need headlines and snippets from news sources
+- Want to restrict by publication date
+
+**When to use scrape_page instead:**
+- You need the full article content
 
 **Key parameters:**
 - freshness: hour, day, week, month, year (default: week)
 - sort_by: relevance or date
-- news_source: Restrict to specific domain (e.g., 'bbc.com')`,
+- news_source: Restrict to specific domain (e.g., 'bbc.com')
+
+**Caching:** Results cached for 30 minutes.`,
             inputSchema: {
                 query: z.string().min(1).max(500)
                     .describe('The news search query'),
@@ -1689,17 +1729,20 @@ Use this when you already have a specific URL. For researching a topic across mu
         "sequential_search",
         {
             title: "Sequential Search",
-            description: `Track multi-step research progress. For simple queries, use search_and_scrape directly. Use sequential_search when you need to:
+            description: `Track multi-step research progress across multiple API calls.
 
-**When to use this vs search_and_scrape:**
-- ✓ Complex investigations requiring 3+ searches with different angles
-- ✓ Research you might abandon early (tracks partial progress)
-- ✓ Investigations where you need to show your reasoning steps
-- ✓ Research with branching paths to explore alternatives
+**When to use:**
+- Complex investigations requiring 3+ searches with different angles
+- Research you might abandon early (tracks partial progress)
+- Investigations where you need to show reasoning steps
+- Research with branching paths to explore alternatives
 
-**Key Principle:** You do the reasoning; this tool tracks state. It persists across API calls so you can build on previous steps.
+**When to use search_and_scrape instead:**
+- Simple queries that need content from multiple sources in one call
 
-**Example Flow:**
+**Key principle:** You do the reasoning; this tool tracks state. It persists across API calls so you can build on previous steps.
+
+**Example flow:**
 1. Start: sequential_search(searchStep: "Starting research on X", stepNumber: 1, nextStepNeeded: true)
 2. Search: search_and_scrape("topic")
 3. Record: sequential_search(searchStep: "Found Y, need Z", stepNumber: 2, source: {...}, nextStepNeeded: true)
@@ -1727,11 +1770,10 @@ Use this when you already have a specific URL. For researching a topic across mu
             title: "Academic Paper Search",
             description: `Search academic papers using Google Custom Search API.
 
-**Best for:**
+**When to use:**
 - Finding peer-reviewed, authoritative sources
 - Research requiring citations and references
-- Technical/scientific topics
-- Literature reviews
+- Technical/scientific topics and literature reviews
 
 **Features:**
 - Paper titles, authors, abstracts
@@ -1739,9 +1781,9 @@ Use this when you already have a specific URL. For researching a topic across mu
 - Direct PDF links (when available)
 - Pre-formatted citations (APA, MLA, BibTeX)
 
-**Academic Sources:** arXiv, PubMed, IEEE, Nature, Springer, ResearchGate, JSTOR, and more.
+**Academic sources:** arXiv, PubMed, IEEE, Nature, Springer, ResearchGate, JSTOR, and more.
 
-**Note:** Uses same Google API credentials as other search tools.`,
+**Caching:** Results cached for 30 minutes.`,
             inputSchema: academicSearchInputSchema,
             outputSchema: acadSearchSchema,
             annotations: {
@@ -1777,7 +1819,7 @@ Use this when you already have a specific URL. For researching a topic across mu
             title: "Patent Search",
             description: `Search patents using Google Custom Search API (site:patents.google.com).
 
-**Best for:**
+**When to use:**
 - Prior art search before filing
 - Freedom to operate (FTO) analysis
 - Patent landscaping and competitive intelligence
@@ -1796,7 +1838,7 @@ Use this when you already have a specific URL. For researching a topic across mu
 - specific: Look up specific patent(s)
 - landscape: Broad overview of a technology area
 
-**Note:** Uses same Google API credentials as other search tools.`,
+**Caching:** Results cached for 30 minutes.`,
             inputSchema: patentSearchInputSchema,
             outputSchema: patentSchema,
             annotations: {
@@ -1832,7 +1874,7 @@ Use this when you already have a specific URL. For researching a topic across mu
             title: "Patent Assignee Search",
             description: `Search all patents for a specific company/assignee using PatentsView API.
 
-**Best for:**
+**When to use:**
 - Building patent portfolios for companies
 - Tracking competitor patent activity
 - Due diligence and M&A research
@@ -1845,11 +1887,10 @@ Use this when you already have a specific URL. For researching a topic across mu
 - Summary aggregations by status, type, and year
 
 **Requirements:**
-- Requires PATENTSVIEW_API_KEY environment variable
-- Free API key from: https://patentsview.org/apis/keyrequest
+- PATENTSVIEW_API_KEY environment variable (free: https://patentsview.org/apis/keyrequest)
 - Rate limit: 45 requests/minute
 
-**Note:** For comprehensive portfolio analysis, use with the patent-portfolio-analysis prompt.`,
+**Tip:** For comprehensive portfolio analysis, use with the patent-portfolio-analysis prompt.`,
             inputSchema: patentAssigneeSearchInputSchema,
             annotations: {
                 title: "Patent Assignee Search",
@@ -1884,7 +1925,7 @@ Use this when you already have a specific URL. For researching a topic across mu
             title: "Patent Details",
             description: `Get comprehensive details for a specific patent including status, citations, and claims.
 
-**Best for:**
+**When to use:**
 - Deep-dive into specific patents of interest
 - Citation analysis (who cites this patent, what it cites)
 - Understanding patent claims and scope
@@ -1899,11 +1940,10 @@ Use this when you already have a specific URL. For researching a topic across mu
 - Calculated expiration date and status
 
 **Requirements:**
-- Requires PATENTSVIEW_API_KEY environment variable
-- Free API key from: https://patentsview.org/apis/keyrequest
+- PATENTSVIEW_API_KEY environment variable (free: https://patentsview.org/apis/keyrequest)
 - Rate limit: 45 requests/minute
 
-**Patent number formats accepted:**
+**Patent number formats:**
 - Plain number: "11886826"
 - With country prefix: "US11886826"
 - With kind code: "US11886826B1"`,

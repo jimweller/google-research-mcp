@@ -7,31 +7,17 @@
 
 import { z } from 'zod';
 import { logger } from '../shared/logger.js';
+import {
+  CPC_SECTIONS,
+  ASSIGNEE_TYPE_MAP,
+  getTechnologyArea,
+  calculatePatentExpiration,
+  calculatePatentStatus,
+} from '../shared/patentConstants.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const PATENTSVIEW_API_BASE = 'https://search.patentsview.org/api/v1';
-
-const CPC_SECTIONS: Record<string, string> = {
-  'A': 'Human Necessities',
-  'B': 'Performing Operations; Transporting',
-  'C': 'Chemistry; Metallurgy',
-  'D': 'Textiles; Paper',
-  'E': 'Fixed Constructions',
-  'F': 'Mechanical Engineering; Lighting; Heating; Weapons',
-  'G': 'Physics',
-  'H': 'Electricity',
-  'Y': 'Emerging Technologies',
-};
-
-const ASSIGNEE_TYPE_MAP: Record<string, string> = {
-  'any': '',
-  'us_company': '2',
-  'foreign_company': '3',
-  'us_individual': '4',
-  'foreign_individual': '5',
-  'government': '6',
-};
 
 // ── Input Schema ────────────────────────────────────────────────────────────
 
@@ -102,52 +88,6 @@ export interface PatentAssigneeSearchOutput {
 // ── Helper Functions ────────────────────────────────────────────────────────
 
 /**
- * Calculate patent expiration date based on filing date and patent type
- * Utility patents: 20 years from filing date
- * Design patents: 15 years from grant date (post-2015) or 14 years (pre-2015)
- */
-function calculateExpirationDate(filingDate: string, grantDate: string, patentType: string): string | undefined {
-  if (!filingDate && !grantDate) return undefined;
-
-  try {
-    if (patentType === 'utility' || patentType === 'plant') {
-      // 20 years from filing date
-      const filing = new Date(filingDate);
-      if (isNaN(filing.getTime())) return undefined;
-      filing.setFullYear(filing.getFullYear() + 20);
-      return filing.toISOString().split('T')[0];
-    } else if (patentType === 'design') {
-      // 15 years from grant date (for patents granted after May 13, 2015)
-      const grant = new Date(grantDate);
-      if (isNaN(grant.getTime())) return undefined;
-      const cutoff = new Date('2015-05-13');
-      const years = grant >= cutoff ? 15 : 14;
-      grant.setFullYear(grant.getFullYear() + years);
-      return grant.toISOString().split('T')[0];
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
-
-/**
- * Determine if a patent is active or expired
- */
-function calculateStatus(expirationDate?: string): 'active' | 'expired' | 'unknown' {
-  if (!expirationDate) return 'unknown';
-
-  try {
-    const expiration = new Date(expirationDate);
-    if (isNaN(expiration.getTime())) return 'unknown';
-    return expiration > new Date() ? 'active' : 'expired';
-  } catch {
-    return 'unknown';
-  }
-}
-
-/**
  * Map patent type from PatentsView format
  */
 function mapPatentType(type: string): 'utility' | 'design' | 'plant' | 'reissue' | 'other' {
@@ -157,15 +97,6 @@ function mapPatentType(type: string): 'utility' | 'design' | 'plant' | 'reissue'
   if (normalized.includes('plant')) return 'plant';
   if (normalized.includes('reissue')) return 'reissue';
   return 'other';
-}
-
-/**
- * Get technology area description from CPC code
- */
-function getTechnologyArea(cpcCode: string): string {
-  if (!cpcCode || cpcCode.length === 0) return 'Unknown';
-  const section = cpcCode.charAt(0).toUpperCase();
-  return CPC_SECTIONS[section] || 'Unknown';
 }
 
 /**
@@ -453,8 +384,8 @@ export async function handlePatentAssigneeSearch(
       const patentType = mapPatentType(p.patent_type || '');
       const grantDate = p.patent_date || '';
       const filingDate = p.applications?.[0]?.app_date || '';
-      const expirationDate = calculateExpirationDate(filingDate, grantDate, patentType);
-      const status = calculateStatus(expirationDate);
+      const expirationDate = calculatePatentExpiration(filingDate, grantDate, patentType);
+      const status = calculatePatentStatus(expirationDate);
 
       // Filter expired if requested (default is to include expired)
       if (params.include_expired === false && status === 'expired') {

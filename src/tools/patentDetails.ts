@@ -7,22 +7,17 @@
 
 import { z } from 'zod';
 import { logger } from '../shared/logger.js';
+import {
+  CPC_SECTIONS,
+  getTechnologyArea,
+  getAssigneeTypeDescription,
+  calculatePatentExpiration,
+  calculatePatentStatus,
+} from '../shared/patentConstants.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const PATENTSVIEW_API_BASE = 'https://search.patentsview.org/api/v1';
-
-const CPC_SECTIONS: Record<string, string> = {
-  'A': 'Human Necessities',
-  'B': 'Performing Operations; Transporting',
-  'C': 'Chemistry; Metallurgy',
-  'D': 'Textiles; Paper',
-  'E': 'Fixed Constructions',
-  'F': 'Mechanical Engineering; Lighting; Heating; Weapons',
-  'G': 'Physics',
-  'H': 'Electricity',
-  'Y': 'Emerging Technologies',
-};
 
 // ── Input Schema ────────────────────────────────────────────────────────────
 
@@ -137,76 +132,6 @@ function isValidPatentNumber(input: string): boolean {
   const normalized = normalizePatentNumber(input);
   // US patent numbers are typically 6-8 digits
   return /^\d{5,11}$/.test(normalized);
-}
-
-/**
- * Calculate patent expiration date
- */
-function calculateExpirationDate(filingDate: string, grantDate: string, patentType: string): string {
-  if (!filingDate && !grantDate) return '';
-
-  try {
-    const normalizedType = patentType?.toLowerCase() || '';
-
-    if (normalizedType.includes('utility') || normalizedType.includes('plant')) {
-      const filing = new Date(filingDate);
-      if (isNaN(filing.getTime())) return '';
-      filing.setFullYear(filing.getFullYear() + 20);
-      return filing.toISOString().split('T')[0];
-    } else if (normalizedType.includes('design')) {
-      const grant = new Date(grantDate);
-      if (isNaN(grant.getTime())) return '';
-      const cutoff = new Date('2015-05-13');
-      const years = grant >= cutoff ? 15 : 14;
-      grant.setFullYear(grant.getFullYear() + years);
-      return grant.toISOString().split('T')[0];
-    }
-  } catch {
-    return '';
-  }
-
-  return '';
-}
-
-/**
- * Calculate patent status
- */
-function calculateStatus(expirationDate: string): 'active' | 'expired' | 'unknown' {
-  if (!expirationDate) return 'unknown';
-
-  try {
-    const expiration = new Date(expirationDate);
-    if (isNaN(expiration.getTime())) return 'unknown';
-    return expiration > new Date() ? 'active' : 'expired';
-  } catch {
-    return 'unknown';
-  }
-}
-
-/**
- * Get CPC description
- */
-function getCpcDescription(code: string): string {
-  if (!code || code.length === 0) return 'Unknown';
-  const section = code.charAt(0).toUpperCase();
-  return CPC_SECTIONS[section] || 'Unknown';
-}
-
-/**
- * Map assignee type code to description
- */
-function getAssigneeTypeDescription(typeCode: string): string {
-  const types: Record<string, string> = {
-    '2': 'US Company/Corporation',
-    '3': 'Foreign Company/Corporation',
-    '4': 'US Individual',
-    '5': 'Foreign Individual',
-    '6': 'US Government',
-    '7': 'Foreign Government',
-    '8': 'Country Government',
-    '9': 'State Government (US)',
-  };
-  return types[typeCode] || 'Unknown';
 }
 
 // ── PatentsView API Response Types ──────────────────────────────────────────
@@ -405,8 +330,8 @@ export async function handlePatentDetails(
     const grantDate = p.patent_date || '';
     const filingDate = p.applications?.[0]?.app_date || '';
     const patentType = p.patent_type || '';
-    const expirationDate = calculateExpirationDate(filingDate, grantDate, patentType);
-    const status = calculateStatus(expirationDate);
+    const expirationDate = calculatePatentExpiration(filingDate, grantDate, patentType);
+    const status = calculatePatentStatus(expirationDate);
 
     // Build assignees
     const assignees: PatentAssignee[] = (p.assignees || []).map(a => ({
@@ -435,7 +360,7 @@ export async function handlePatentDetails(
     // Build CPC codes
     const cpcCodes: PatentCpcCode[] = (p.cpcs || []).map((c, index) => ({
       code: c.cpc_group_id || c.cpc_subgroup_id || '',
-      description: getCpcDescription(c.cpc_group_id || ''),
+      description: getTechnologyArea(c.cpc_group_id || ''),
       isPrimary: index === 0
     })).filter(c => c.code);
 
@@ -478,7 +403,7 @@ export async function handlePatentDetails(
       assignees,
       inventors,
       cpcCodes,
-      primaryTechnologyArea: getCpcDescription(primaryCpc),
+      primaryTechnologyArea: getTechnologyArea(primaryCpc),
       citations,
       claims,
       url: `https://patents.google.com/patent/US${patentNumber}`,

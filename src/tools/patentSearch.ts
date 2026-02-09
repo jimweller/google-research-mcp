@@ -8,6 +8,8 @@
 import { z } from 'zod';
 import { logger } from '../shared/logger.js';
 import type { PatentResultOutput, PatentSearchOutput } from '../schemas/outputSchemas.js';
+import type { GoogleSearchItem, GoogleSearchResponse } from '../types/googleApi.js';
+import { CPC_SECTIONS, PATENT_OFFICE_PREFIXES, getTechnologyArea } from '../shared/patentConstants.js';
 
 // ── Input Schema ───────────────────────────────────────────────────────────
 
@@ -47,31 +49,6 @@ export type PatentSearchInput = {
 // ── Output Schema ──────────────────────────────────────────────────────────
 
 export { patentSearchOutputSchema } from '../schemas/outputSchemas.js';
-
-// ── Patent Office Mapping ──────────────────────────────────────────────────
-
-const PATENT_OFFICE_PREFIXES: Record<string, string> = {
-  'US': 'US',
-  'EP': 'EP',
-  'WO': 'WO',
-  'JP': 'JP',
-  'CN': 'CN',
-  'KR': 'KR',
-};
-
-// ── CPC Section Descriptions ───────────────────────────────────────────────
-
-const CPC_SECTIONS: Record<string, string> = {
-  'A': 'Human Necessities',
-  'B': 'Performing Operations; Transporting',
-  'C': 'Chemistry; Metallurgy',
-  'D': 'Textiles; Paper',
-  'E': 'Fixed Constructions',
-  'F': 'Mechanical Engineering; Lighting; Heating; Weapons',
-  'G': 'Physics',
-  'H': 'Electricity',
-  'Y': 'Emerging Technologies',
-};
 
 // ── Helper Functions ───────────────────────────────────────────────────────
 
@@ -262,29 +239,6 @@ function parsePatentResult(item: GoogleSearchItem): PatentResultOutput | null {
   }
 
   return result;
-}
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface GoogleSearchItem {
-  title: string;
-  link: string;
-  snippet?: string;
-  displayLink?: string;
-  pagemap?: {
-    metatags?: Array<Record<string, string>>;
-  };
-}
-
-interface GoogleSearchResponse {
-  searchInformation?: {
-    totalResults?: string;
-  };
-  items?: GoogleSearchItem[];
-  error?: {
-    message: string;
-    code: number;
-  };
 }
 
 // ── Main Handler ───────────────────────────────────────────────────────────
