@@ -32,6 +32,8 @@ The Google Researcher MCP Server is a backend service that implements the [Model
 -   **`sequential_search`**: Tracks multi-step research state following the `sequential_thinking` pattern. Tracks steps, sources, knowledge gaps, and supports branching.
 -   **`academic_search`**: Searches academic papers via Google Custom Search API (filtered to arXiv, PubMed, IEEE, etc.) with pre-formatted citations (APA, MLA, BibTeX).
 -   **`patent_search`**: Searches Google Patents for prior art, FTO analysis, and patent landscaping. Supports filtering by patent office, assignee, inventor, and CPC code.
+-   **`patent_assignee_search`**: Searches all patents for a specific company using the PatentsView API. Full pagination, status calculation, and aggregations.
+-   **`patent_details`**: Gets comprehensive patent details including citations, claims, and calculated expiration status from PatentsView API.
 
 The server also exposes:
 -   **MCP Resources**: Server state (recent searches, cache stats, configuration) via the Resources protocol.
@@ -70,12 +72,15 @@ google-researcher-mcp/
 │   │   ├── envValidator.ts       # Startup validation
 │   │   ├── logger.ts             # Structured logging
 │   │   ├── oauthMiddleware.ts    # OAuth 2.1 for HTTP transport
+│   │   ├── patentConstants.ts    # Shared patent constants and helpers
 │   │   ├── persistentEventStore.ts # SSE session replay
 │   │   ├── qualityScoring.ts     # Source ranking
 │   │   └── urlValidator.ts       # SSRF protection
 │   ├── tools/                    # Standalone tool implementations
 │   │   ├── academicSearch.ts     # Academic paper search
-│   │   ├── patentSearch.ts       # Patent search
+│   │   ├── patentAssigneeSearch.ts # Patent portfolio search (PatentsView)
+│   │   ├── patentDetails.ts      # Patent details lookup (PatentsView)
+│   │   ├── patentSearch.ts       # Patent search (Google Patents)
 │   │   ├── sequentialSearch.ts   # Multi-step research tracking
 │   │   └── toolMetadata.ts       # Icons and metadata for all tools
 │   ├── types/                    # TypeScript type definitions
@@ -130,6 +135,8 @@ graph TD
         SEQ[sequential_search]
         ACAD[academic_search]
         PAT[patent_search]
+        PATAS[patent_assignee_search]
+        PATDET[patent_details]
         YT[YouTube Transcript Extractor]
         QS[Quality Scoring]
     end
@@ -144,6 +151,7 @@ graph TD
         M[Google Search API]
         N[Web Pages]
         P[YouTube Transcript API]
+        PV[PatentsView API]
     end
 
     A -- Connects via --> B
@@ -162,6 +170,8 @@ graph TD
     E -- Invokes --> SEQ
     E -- Invokes --> ACAD
     E -- Invokes --> PAT
+    E -- Invokes --> PATAS
+    E -- Invokes --> PATDET
 
     D -- Exposes --> RES
     D -- Exposes --> PROMPTS
@@ -178,12 +188,14 @@ graph TD
     NEWS -- Calls --> M
     ACAD -- Calls --> M
     PAT -- Calls --> M
+    PATAS -- Calls --> PV
+    PATDET -- Calls --> PV
     YT -- Calls --> P
 
     I -- Uses --> F
     I -- Uses --> G
 
-    F & G & I & IMG & NEWS & SEQ & ACAD & PAT & YT -- Use for caching --> J
+    F & G & I & IMG & NEWS & SEQ & ACAD & PAT & PATAS & PATDET & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
 
     style YT fill:#cce5ff,stroke:#333,stroke-width:2px
@@ -283,6 +295,7 @@ For security configuration details, see the OAuth 2.1 section in the [**README**
     -   `fact-check`: Claim verification against multiple sources.
     -   `summarize-url`: Single URL summarization in various formats.
     -   `news-briefing`: Current news summary with time range filtering.
+    -   `patent-portfolio-analysis`: Comprehensive patent portfolio analysis for companies.
 -   **Use Case**: Provides structured guidance for common research tasks.
 
 ### Caching System
