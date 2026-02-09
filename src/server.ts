@@ -28,7 +28,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PersistentEventStore } from "./shared/persistentEventStore.js";
 import { z } from "zod";
-import { CheerioCrawler, PlaywrightCrawler, Configuration } from "crawlee";
+import { CheerioCrawler, PlaywrightCrawler, Configuration, log as crawleeLog, LogLevel as CrawleeLogLevel } from "crawlee";
 import { PersistentCache, HybridPersistenceStrategy } from "./cache/index.js";
 import { serveOAuthScopesDocumentation } from "./shared/oauthScopesDocumentation.js";
 import { createOAuthMiddleware, OAuthMiddlewareOptions } from "./shared/oauthMiddleware.js";
@@ -155,6 +155,11 @@ async function initializeGlobalInstances(
   crawleeConfig.set('storageClientOptions', {
     localDataDirectory: crawleeStoragePath,
   });
+
+  // Suppress Crawlee's default logging which writes to stdout.
+  // In STDIO transport mode, stdout is reserved for MCP JSON-RPC messages —
+  // any other output corrupts the protocol and causes silent scraping failures.
+  crawleeLog.setLevel(CrawleeLogLevel.OFF);
 
   globalCacheInstance = new PersistentCache({
     defaultTTL: 5 * 60 * 1000, // 5 minutes default TTL
@@ -365,6 +370,12 @@ function configureToolsAndResources(
      */
     async function scrapeWithCheerio(url: string): Promise<string> {
         let page = "";
+        // Each crawler needs its own Configuration to avoid request queue corruption
+        // when running multiple crawlers sequentially with maxRequestsPerCrawl: 1
+        const crawlerConfig = new Configuration({
+            persistStorage: false,
+            storageClientOptions: { localDataDirectory: `${DEFAULT_CRAWLEE_STORAGE_PATH}/cheerio_${randomUUID()}` },
+        });
         const crawler = new CheerioCrawler({
             requestHandler: async ({ $ }) => {
                 if (typeof $ !== 'function') {
@@ -397,7 +408,7 @@ function configureToolsAndResources(
             requestHandlerTimeoutSecs: 15,
             maxRequestsPerCrawl: 1,
             maxRequestRetries: 0,
-        });
+        }, crawlerConfig);
         const crawlPromise = crawler.run([{ url }]);
         await withTimeout(crawlPromise, SCRAPE_TIMEOUT_MS, 'Web page scraping');
         return page;
@@ -409,6 +420,11 @@ function configureToolsAndResources(
      */
     async function scrapeWithPlaywright(url: string): Promise<string> {
         let pageContent = "";
+        // Each crawler needs its own Configuration to avoid request queue corruption
+        const crawlerConfig = new Configuration({
+            persistStorage: false,
+            storageClientOptions: { localDataDirectory: `${DEFAULT_CRAWLEE_STORAGE_PATH}/playwright_${randomUUID()}` },
+        });
         const crawler = new PlaywrightCrawler({
             requestHandler: async ({ page }) => {
                 await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
@@ -431,7 +447,7 @@ function configureToolsAndResources(
             launchContext: {
                 launchOptions: { args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'] }
             },
-        });
+        }, crawlerConfig);
         const crawlPromise = crawler.run([{ url }]);
         await withTimeout(crawlPromise, PLAYWRIGHT_TIMEOUT_SECS * 1000, 'Playwright scraping');
         return pageContent;

@@ -61,7 +61,9 @@ jest.mock('crawlee', () => ({
   PlaywrightCrawler: jest.fn().mockImplementation(() => ({
     run: jest.fn(() => Promise.resolve())
   })),
-  Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) }
+  Configuration: { getGlobalConfig: () => ({ set: jest.fn() }) },
+  log: { setLevel: jest.fn() },
+  LogLevel: { OFF: 0, ERROR: 1, WARNING: 2, INFO: 3, DEBUG: 4 }
 }));
 
 // Mock YouTube transcript with different scenarios

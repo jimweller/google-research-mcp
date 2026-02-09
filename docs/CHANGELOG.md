@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Cache Init Race Condition**: `PersistentCache.getOrCompute()` now awaits a shared init promise instead of spawning per-call `setInterval` polling timers. Concurrent calls during startup no longer risk timeouts or resource leaks. (#54)
 - **Synchronous Shutdown I/O**: Signal handlers (SIGINT, SIGTERM, SIGHUP) now attempt async `persistToDisk()` with a 5-second grace period before falling back to synchronous writes. Added `registerShutdownHandlers` option so `server.ts` can manage shutdown exclusively via its own `gracefulShutdown()`, eliminating double signal handling. (#53)
+- **Crawlee Request Queue Corruption**: Fixed silent scraping failures where only the first scraped URL returned content. Root cause: Crawlee's global request queue gets corrupted when multiple `CheerioCrawler`/`PlaywrightCrawler` instances are created with `maxRequestsPerCrawl: 1`. Fix: Each crawler now uses its own `Configuration` instance with a unique storage directory.
+- **Crawlee STDIO Corruption**: Suppressed Crawlee's default logging which writes to stdout, corrupting the MCP STDIO JSON-RPC protocol. Added `log.setLevel(LogLevel.OFF)` during initialization.
 - **YouTube Transcripts**: Upgraded `@danielxceron/youtube-transcript` to ^1.2.6 to fix `playerCaptionsTracklistRenderer` extraction errors
 - **EventEmitter Leak**: Fixed process listener cleanup in `PersistentCache.dispose()` to prevent `MaxListenersExceededWarning`
 - **Jest Worker Exit**: Guarded STDIO transport initialization in test environments to prevent worker hang
