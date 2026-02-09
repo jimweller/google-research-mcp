@@ -1,3 +1,4 @@
+# Publish stable releases to npm when a GitHub Release is created
 name: Release
 
 on:
