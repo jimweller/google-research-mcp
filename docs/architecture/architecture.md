@@ -24,11 +24,17 @@ This document provides a comprehensive overview of the Google Researcher MCP Ser
 
 The Google Researcher MCP Server is a backend service that implements the [Model Context Protocol (MCP)](https://github.com/zoharbabin/google-research-mcp). Its primary purpose is to empower AI assistants and other clients with a powerful suite of research-oriented tools:
 
--   **`google_search`**: Executes queries against the Google Search API. Supports recency filtering via `time_range`.
--   **`scrape_page`**: Extracts text content from web pages and YouTube videos.
--   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, returning combined raw content with source attribution.
+-   **`google_search`**: Executes queries against the Google Search API. Supports recency filtering via `time_range` and advanced filters.
+-   **`google_image_search`**: Searches Google Images with filtering by size, type, color, and file format.
+-   **`google_news_search`**: Searches Google News with freshness filtering and date-based sorting.
+-   **`scrape_page`**: Extracts text content from web pages, YouTube videos, and documents (PDF, DOCX, PPTX).
+-   **`search_and_scrape`**: A composite tool that searches Google and scrapes the top results in parallel, with quality scoring and ranking.
 
-To deliver these capabilities reliably and efficiently, the server is built with production-grade features, including a two-layer persistent cache, robust timeout and error handling, and enterprise-grade security for its web-facing endpoints.
+The server also exposes:
+-   **MCP Resources**: Server state (recent searches, cache stats, configuration) via the Resources protocol.
+-   **MCP Prompts**: Pre-built research workflow templates (comprehensive research, fact-check, summarize, news briefing).
+
+To deliver these capabilities reliably and efficiently, the server is built with production-grade features, including quality scoring, content deduplication, a two-layer persistent cache, robust timeout and error handling, and enterprise-grade security for its web-facing endpoints.
 
 ## Core Architectural Principles
 
@@ -65,7 +71,15 @@ graph TD
         F[google_search]
         G[scrape_page]
         I[search_and_scrape]
+        IMG[google_image_search]
+        NEWS[google_news_search]
         YT[YouTube Transcript Extractor]
+        QS[Quality Scoring]
+    end
+
+    subgraph "MCP Primitives"
+        RES[Resources]
+        PROMPTS[Prompts]
     end
 
     subgraph "External Services"
@@ -85,20 +99,31 @@ graph TD
     E -- Invokes --> F
     E -- Invokes --> G
     E -- Invokes --> I
+    E -- Invokes --> IMG
+    E -- Invokes --> NEWS
+
+    D -- Exposes --> RES
+    D -- Exposes --> PROMPTS
 
     G -- Uses --> YT
+    I -- Uses --> QS
 
     F -- Calls --> M
     G -- Calls --> N
+    IMG -- Calls --> M
+    NEWS -- Calls --> M
     YT -- Calls --> P
 
     I -- Uses --> F
     I -- Uses --> G
 
-    F & G & I & YT -- Use for caching --> J
+    F & G & I & IMG & NEWS & YT -- Use for caching --> J
     D -- Uses for session resumption --> K
 
     style YT fill:#cce5ff,stroke:#333,stroke-width:2px
+    style QS fill:#d4edda,stroke:#333,stroke-width:2px
+    style RES fill:#fff3cd,stroke:#333,stroke-width:2px
+    style PROMPTS fill:#fff3cd,stroke:#333,stroke-width:2px
 
     style J fill:#e6f2ff,stroke:#333,stroke-width:2px
     style K fill:#e6ffe6,stroke:#333,stroke-width:2px
@@ -157,6 +182,39 @@ For security configuration details, see the OAuth 2.1 section in the [**README**
     -   **Performance Optimized**: Significantly faster and more efficient than previous methods.
 -   **Integration**: This component is used exclusively by the `scrape_page` tool when a YouTube URL is detected.
 -   **Further Reading**: [**YouTube Transcript Extraction Technical Documentation**](../youtube-transcript-extraction.md)
+
+### Quality Scoring
+
+-   **File**: [`src/shared/qualityScoring.ts`](../src/shared/qualityScoring.ts)
+-   **Description**: Scores and ranks sources based on multiple quality factors.
+-   **Scoring Factors**:
+    -   **Relevance (35%)**: Query term matching, exact phrase detection, term frequency.
+    -   **Freshness (20%)**: Publication recency with time-based decay.
+    -   **Authority (25%)**: Domain reputation (.gov, .edu, major publications).
+    -   **Content Quality (20%)**: Content length, structure, paragraph formatting.
+-   **Integration**: Used by `search_and_scrape` to rank sources in the output.
+
+### MCP Resources
+
+-   **File**: [`src/resources/index.ts`](../src/resources/index.ts)
+-   **Description**: Exposes server state via the MCP Resources protocol.
+-   **Available Resources**:
+    -   `search://recent`: Last 20 search queries with timestamps.
+    -   `config://server`: Server configuration and version info.
+    -   `stats://cache`: Cache performance statistics.
+    -   `stats://events`: Event store statistics.
+-   **Use Case**: Allows clients to inspect server state programmatically.
+
+### MCP Prompts
+
+-   **File**: [`src/prompts/index.ts`](../src/prompts/index.ts)
+-   **Description**: Pre-built research workflow templates via the MCP Prompts protocol.
+-   **Available Prompts**:
+    -   `comprehensive-research`: Multi-source topic research with depth control.
+    -   `fact-check`: Claim verification against multiple sources.
+    -   `summarize-url`: Single URL summarization in various formats.
+    -   `news-briefing`: Current news summary with time range filtering.
+-   **Use Case**: Provides structured guidance for common research tasks.
 
 ### Caching System
 

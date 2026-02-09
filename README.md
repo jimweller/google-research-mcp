@@ -61,6 +61,8 @@ npm run dev            # Server is now running on STDIO transport
 - [Security](#security)
   - [OAuth 2.1 Authorization](#oauth-21-authorization)
   - [Available Scopes](#available-scopes)
+- [MCP Resources](#mcp-resources)
+- [MCP Prompts](#mcp-prompts)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
@@ -73,22 +75,30 @@ npm run dev            # Server is now running on STDIO transport
 
 | Tool | Best For | Use When... |
 | :--- | :--- | :--- |
-| **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. |
+| **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. Sources are quality-scored and ranked. |
 | **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or you want to process pages yourself with custom logic. |
+| **`google_image_search`** | Finding images | You need to find images on a topic with filtering by size, type, color, or format. |
+| **`google_news_search`** | Current news | You need recent news articles with freshness filtering and date sorting. |
 | **`scrape_page`** | Reading a specific URL | You already have a URL and need its content. Also use for YouTube transcripts and documents (PDF, DOCX, PPTX). |
 
 ### Tool Details
 
 | Tool | Description |
 | :--- | :--- |
-| **`search_and_scrape`** | Searches Google and retrieves content from top results in one call. Returns combined, deduplicated text with source attribution. Handles JavaScript-rendered pages and fails gracefully if some sources are unavailable.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 3), `include_sources` (boolean, default true), `deduplicate` (boolean, default true). |
+| **`search_and_scrape`** | Searches Google and retrieves content from top results in one call. Returns combined, deduplicated text with source attribution. Sources are quality-scored (relevance, freshness, authority, content quality) and ranked. Handles JavaScript-rendered pages and fails gracefully if some sources are unavailable.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 3), `include_sources` (boolean, default true), `deduplicate` (boolean, default true). |
 | **`google_search`** | Returns ranked URLs from Google Custom Search. Use advanced filters for precise results: `site_search` (limit to domain), `time_range` (day/week/month/year), `exact_terms`, `exclude_terms`, `language`, `country`. Results cached 30 min.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), plus optional filters. |
+| **`google_image_search`** | Searches Google Images via Custom Search API. Returns image URLs, thumbnails, dimensions, and source context.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), `size` (huge/large/medium/small), `type` (clipart/face/lineart/photo/animated), `color_type` (color/gray/mono/trans), `dominant_color`, `file_type` (jpg/gif/png/bmp/svg/webp). |
+| **`google_news_search`** | Searches Google News via Custom Search API. Returns article headlines, snippets, publication dates, and sources.<br><br>**Parameters:** `query` (string, 1-500 chars), `num_results` (1-10, default 5), `freshness` (hour/day/week/month/year, default week), `sort_by` (relevance/date), `news_source` (filter to specific source). |
 | **`scrape_page`** | Extracts text from a URL. Auto-detects content type: web pages (static or JS-rendered), YouTube videos (transcript), documents (PDF/DOCX/PPTX). Results cached 1 hour.<br><br>**Parameters:** `url` (string, max 2048 chars). |
 
 ## Features
 
 - **Tiered Web Scraping**: Fast static HTML extraction (CheerioCrawler), with automatic Playwright/Chromium fallback for JavaScript-rendered pages. Zero configuration — Chromium is installed as part of setup.
 - **YouTube Transcript Extraction**: Robust extraction with 10 classified error types, automatic retries with exponential backoff for transient failures, and clear actionable error messages. See the [full documentation](./docs/youtube-transcript-extraction.md).
+- **Quality Scoring**: Sources in `search_and_scrape` are automatically scored and ranked by relevance (35%), freshness (20%), authority (25%), and content quality (20%). High-authority domains (.gov, .edu, major publications) are prioritized.
+- **MCP Resources**: Expose server state via the MCP Resources protocol — query recent searches, cache stats, and event store statistics programmatically.
+- **MCP Prompts**: Pre-built research workflow templates (`comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing`) for common use cases.
+- **Content Annotations**: Tool responses include MCP-compliant annotations (audience, priority, timestamp) to help clients filter and prioritize content.
 - **Persistent Caching**: Two-layer cache (in-memory + disk) with per-tool namespaces. Reduces latency on repeated queries and minimizes Google API costs. Manual and automated persistence via the [Management API](#management-api).
 - **Dual Transport**: STDIO for local MCP clients, HTTP+SSE for web applications and multi-client setups.
 - **Enterprise Security**: OAuth 2.1 with JWT validation, granular scopes, and SSRF protection for scraping.
@@ -110,20 +120,27 @@ graph TD
     D --> F[google_search]
     D --> G[scrape_page]
     D --> I[search_and_scrape]
+    D --> IMG[google_image_search]
+    D --> NEWS[google_news_search]
     I -.->|delegates| F
     I -.->|delegates| G
+    I --> Q[Quality Scoring]
 
     G --> N[SSRF Validator]
     N --> S1[CheerioCrawler<br>static HTML]
     S1 -.->|insufficient content| S2[Playwright<br>JS rendering]
     G --> YT[YouTube Transcript<br>Extractor]
 
-    F & G --> J[Persistent Cache<br>memory + disk]
+    F & G & IMG & NEWS --> J[Persistent Cache<br>memory + disk]
+
+    D -.-> R[MCP Resources]
+    D -.-> P[MCP Prompts]
 
     style J fill:#f9f,stroke:#333,stroke-width:2px
     style K fill:#ccf,stroke:#333,stroke-width:2px
     style L fill:#f99,stroke:#333,stroke-width:2px
     style N fill:#ff9,stroke:#333,stroke-width:2px
+    style Q fill:#9f9,stroke:#333,stroke-width:2px
 ```
 
 For a detailed explanation, see the [Architecture Guide](./docs/architecture/architecture.md).
@@ -307,6 +324,8 @@ Configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in `.env`. See `.env.example` 
 
 **Tool Execution:**
 - `mcp:tool:google_search:execute`
+- `mcp:tool:google_image_search:execute`
+- `mcp:tool:google_news_search:execute`
 - `mcp:tool:scrape_page:execute`
 - `mcp:tool:search_and_scrape:execute`
 
@@ -316,6 +335,43 @@ Configure `OAUTH_ISSUER_URL` and `OAUTH_AUDIENCE` in `.env`. See `.env.example` 
 - `mcp:admin:cache:persist`
 - `mcp:admin:event-store:read`
 - `mcp:admin:config:read`
+
+## MCP Resources
+
+The server exposes state via the [MCP Resources protocol](https://modelcontextprotocol.io/docs/specification/resources). Use `resources/list` to discover available resources and `resources/read` to retrieve them.
+
+| URI | Description |
+|-----|-------------|
+| `search://recent` | Last 20 search queries with timestamps and result counts |
+| `config://server` | Server configuration (version, start time, transport mode) |
+| `stats://cache` | Cache statistics (hit rate, entry count, memory usage) |
+| `stats://events` | Event store statistics (event count, storage size) |
+
+**Example** (using MCP SDK):
+```javascript
+const resources = await client.listResources();
+const recentSearches = await client.readResource({ uri: "search://recent" });
+```
+
+## MCP Prompts
+
+Pre-built research workflow templates are available via the [MCP Prompts protocol](https://modelcontextprotocol.io/docs/specification/prompts). Use `prompts/list` to discover prompts and `prompts/get` to retrieve a prompt with arguments.
+
+| Prompt | Arguments | Description |
+|--------|-----------|-------------|
+| `comprehensive-research` | `topic`, `depth` (quick/standard/deep) | Multi-source research on a topic |
+| `fact-check` | `claim`, `sources` (number) | Verify a claim against multiple sources |
+| `summarize-url` | `url`, `format` (brief/detailed/bullets) | Summarize content from a single URL |
+| `news-briefing` | `topic`, `timeRange` (day/week/month) | Get current news summary on a topic |
+
+**Example** (using MCP SDK):
+```javascript
+const prompts = await client.listPrompts();
+const research = await client.getPrompt({
+  name: "comprehensive-research",
+  arguments: { topic: "quantum computing", depth: "standard" }
+});
+```
 
 ## Testing
 
