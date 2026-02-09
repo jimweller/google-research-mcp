@@ -68,14 +68,14 @@ The assistant will use the `google_news_search` tool and return current articles
 
 | Your Task | Use This Tool |
 |-----------|---------------|
-| Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call |
-| Multi-step research with tracking | `sequential_search` — tracks steps, sources, and gaps across multiple searches |
-| Find academic papers | `academic_search` — searches arXiv, PubMed, IEEE, etc. with citations (APA, MLA, BibTeX) |
-| Search patents | `patent_search` — searches Google Patents for prior art, FTO analysis, patent landscaping |
-| Find recent news | `google_news_search` — with freshness filtering |
-| Find images | `google_image_search` — with size/type filtering |
-| Get a list of URLs only | `google_search` — when you'll process pages yourself |
-| Read a specific URL you already have | `scrape_page` — also works for YouTube and documents |
+| Research a topic, answer a question | `search_and_scrape` — searches AND retrieves content in one call (recommended) |
+| Complex multi-step investigation | `sequential_search` — tracks progress across 3+ searches, supports branching |
+| Find academic papers | `academic_search` — searches arXiv, PubMed, IEEE with citations (APA, MLA, BibTeX) |
+| Search patents | `patent_search` — Google Patents for prior art, FTO analysis |
+| Find recent news | `google_news_search` — with freshness filtering and date sorting |
+| Find images | `google_image_search` — with size/type/color filtering |
+| Get a list of URLs only | `google_search` — when you need URLs but will process pages yourself |
+| Read a specific URL | `scrape_page` — also extracts YouTube transcripts and parses PDF/DOCX/PPTX |
 
 ### Example Tool Calls
 
@@ -146,14 +146,14 @@ The assistant will use the `google_news_search` tool and return current articles
 
 | Tool | Best For | Use When... |
 | :--- | :--- | :--- |
-| **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. This is the most efficient choice — it searches AND retrieves content in one call. Sources are quality-scored and ranked. |
-| **`sequential_search`** | **Multi-step research** | Complex investigations requiring multiple searches. Tracks steps, sources, and knowledge gaps. You do the reasoning; the tool tracks state. |
+| **`search_and_scrape`** | **Research (recommended)** | You need to answer a question using web sources. Most efficient — searches AND retrieves content in one call. Sources are quality-scored. |
+| **`sequential_search`** | **Complex investigations** | 3+ searches needed with different angles, or research you might abandon early. Tracks progress, supports branching. You reason; it tracks state. |
 | **`academic_search`** | **Peer-reviewed papers** | Research requiring authoritative academic sources. Returns papers with citations (APA, MLA, BibTeX), abstracts, and PDF links. |
 | **`patent_search`** | **Patent research** | Prior art search, freedom to operate (FTO) analysis, patent landscaping. Returns patents with numbers, assignees, inventors, and PDF links. |
-| **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or you want to process pages yourself with custom logic. |
-| **`google_image_search`** | Finding images | You need to find images on a topic with filtering by size, type, color, or format. |
-| **`google_news_search`** | Current news | You need recent news articles with freshness filtering and date sorting. |
-| **`scrape_page`** | Reading a specific URL | You already have a URL and need its content. Also use for YouTube transcripts and documents (PDF, DOCX, PPTX). |
+| **`google_search`** | Finding URLs only | You only need a list of URLs (not their content), or want to process pages yourself with custom logic. |
+| **`google_image_search`** | Finding images | You need visual content — photos, illustrations, graphics. For text research, use search_and_scrape. |
+| **`google_news_search`** | Current news | You need recent news articles. Use scrape_page on results to read full articles. |
+| **`scrape_page`** | Reading a specific URL | You have a URL and need its content. Auto-handles YouTube transcripts and documents (PDF, DOCX, PPTX). |
 
 ### Tool Reference
 

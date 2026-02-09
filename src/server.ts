@@ -872,8 +872,10 @@ function configureToolsAndResources(
     server.registerTool(
         "scrape_page",
         {
-            title: "Scrape Page",
-            description: `Extract text content from a specific URL you already have. Handles web pages (static and JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX). Use this when you have a specific URL to read. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.
+            title: "Scrape Page (+ YouTube, PDF, DOCX, PPTX)",
+            description: `Extract text content from a URL. Automatically handles: web pages (static + JavaScript-rendered), YouTube videos (extracts transcript), and documents (PDF, DOCX, PPTX - extracts text).
+
+Use this when you already have a specific URL. For researching a topic across multiple sources, use search_and_scrape instead. Results are cached for 1 hour.
 
 **Content Size Control:**
 - max_length: Limit response size (default: no limit, uses server max of 50KB)
@@ -1363,24 +1365,15 @@ function configureToolsAndResources(
         "google_image_search",
         {
             title: "Google Image Search",
-            description: `Search for images using Google Custom Search API.
+            description: `Search for images using Google Custom Search API. Returns image URLs, thumbnails, dimensions, and source page URLs.
 
-Returns image URLs, thumbnails, dimensions, and source page URLs.
+**Best for:** Finding visual content — photos, illustrations, graphics. For text-based web research, use search_and_scrape instead.
 
-**Best for:**
-- Finding visual content and reference images
-- Searching for illustrations, photos, or graphics
-- Locating specific types of images (clipart, photos, etc.)
-
-**Parameters:**
-- query: Search terms (required)
-- num_results: 1-10 images (default: 5)
-- size: huge, icon, large, medium, small, xlarge, xxlarge
-- type: clipart, face, lineart, stock, photo, animated
-- color_type: color, gray, mono (monochrome), trans (transparent)
-- dominant_color: Filter by dominant color
-- file_type: jpg, gif, png, bmp, svg, webp
-- safe: off, medium, high (safe search level)`,
+**Key parameters:**
+- size: huge, large, medium, small
+- type: clipart, face, lineart, photo, animated
+- color_type: color, gray, mono, trans (transparent)
+- file_type: jpg, gif, png, svg, webp`,
             inputSchema: {
                 query: z.string().min(1).max(500)
                     .describe('The image search query'),
@@ -1557,21 +1550,14 @@ Returns image URLs, thumbnails, dimensions, and source page URLs.
         "google_news_search",
         {
             title: "Google News Search",
-            description: `Search for recent news articles with freshness filters and date sorting.
+            description: `Search for recent news articles with freshness filters and date sorting. Ideal for current events, breaking news, and time-sensitive topics.
 
-Ideal for current events, breaking news, and time-sensitive topics.
+**Best for:** Finding recent news. For general web research or reading full articles, use search_and_scrape or scrape_page.
 
-**Best for:**
-- Finding recent news on a topic
-- Getting current events coverage
-- Time-sensitive research
-
-**Parameters:**
-- query: News search terms (required)
-- num_results: 1-10 articles (default: 5)
+**Key parameters:**
 - freshness: hour, day, week, month, year (default: week)
-- sort_by: relevance or date (default: relevance)
-- news_source: Restrict to a specific domain (e.g., 'bbc.com')`,
+- sort_by: relevance or date
+- news_source: Restrict to specific domain (e.g., 'bbc.com')`,
             inputSchema: {
                 query: z.string().min(1).max(500)
                     .describe('The news search query'),
@@ -1693,25 +1679,20 @@ Ideal for current events, breaking news, and time-sensitive topics.
         "sequential_search",
         {
             title: "Sequential Search",
-            description: `Track multi-step research progress, following the pattern of sequential_thinking.
+            description: `Track multi-step research progress. For simple queries, use search_and_scrape directly. Use sequential_search when you need to:
 
-**Purpose:** Helps you (the LLM) manage complex research by tracking:
-- Search steps and progress
-- Sources found with quality scores
-- Knowledge gaps you identify
-- Revisions and branching
+**When to use this vs search_and_scrape:**
+- ✓ Complex investigations requiring 3+ searches with different angles
+- ✓ Research you might abandon early (tracks partial progress)
+- ✓ Investigations where you need to show your reasoning steps
+- ✓ Research with branching paths to explore alternatives
 
-**Key Principle:** You do the reasoning; this tool tracks state.
-
-**When to Use:**
-- Complex questions requiring multiple searches
-- Research where sources need tracking
-- Iterative investigation with knowledge gaps
+**Key Principle:** You do the reasoning; this tool tracks state. It persists across API calls so you can build on previous steps.
 
 **Example Flow:**
 1. Start: sequential_search(searchStep: "Starting research on X", stepNumber: 1, nextStepNeeded: true)
 2. Search: search_and_scrape("topic")
-3. Record: sequential_search(searchStep: "Found Y, need Z", stepNumber: 2, source: {...}, knowledgeGap: "...", nextStepNeeded: true)
+3. Record: sequential_search(searchStep: "Found Y, need Z", stepNumber: 2, source: {...}, nextStepNeeded: true)
 4. Complete: sequential_search(searchStep: "Research complete", stepNumber: 3, nextStepNeeded: false)`,
             inputSchema: sequentialSearchInputSchema,
             outputSchema: seqSearchSchema,
