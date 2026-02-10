@@ -1,10 +1,10 @@
 {
-  "manifest_version": "0.3",
+  "manifest_version": "0.4",
   "name": "google-researcher-mcp",
   "display_name": "Google Researcher MCP",
   "version": "6.0.0",
   "description": "MCP server providing Google Search, web scraping, and multi-source research tools for AI assistants",
-  "long_description": "A comprehensive MCP server that enables AI assistants to search the web, scrape content, and conduct multi-source research.\n\n**Features:**\n- Google Custom Search with filtering options\n- Web page scraping with JavaScript rendering\n- YouTube transcript extraction\n- Document parsing (PDF, DOCX, PPTX)\n- Academic paper and patent search\n- Multi-step research tracking\n- Smart caching and rate limiting",
+  "long_description": "A comprehensive MCP server that enables AI assistants to search the web, scrape content, and conduct multi-source research.\n\n**Features:**\n- Google Custom Search with advanced filtering (time range, site, language)\n- Web page scraping with JavaScript rendering via Playwright\n- YouTube transcript extraction with language support\n- Document parsing (PDF, DOCX, PPTX) with text extraction\n- Academic paper search across arXiv, PubMed, IEEE, Nature, Springer\n- Patent search via Google Patents with prior art analysis\n- Multi-step research tracking for complex investigations\n- Smart caching (30min search, 1hr content) and rate limiting\n- Content deduplication and quality scoring",
   "author": {
     "name": "Zohar Babin",
     "url": "https://github.com/zoharbabin"
@@ -17,6 +17,9 @@
   "documentation": "https://github.com/zoharbabin/google-research-mcp#readme",
   "support": "https://github.com/zoharbabin/google-research-mcp/issues",
   "license": "MIT",
+  "privacy_policies": [
+    "https://policies.google.com/privacy"
+  ],
   "keywords": [
     "google-search",
     "web-scraping",
@@ -24,7 +27,9 @@
     "academic-search",
     "patent-search",
     "youtube-transcripts",
-    "pdf-extraction"
+    "pdf-extraction",
+    "web-research",
+    "content-extraction"
   ],
   "server": {
     "type": "node",
@@ -41,15 +46,15 @@
   "user_config": {
     "google_api_key": {
       "type": "string",
-      "title": "Google Custom Search API Key",
-      "description": "Get your API key from console.cloud.google.com. Enable the Custom Search JSON API.",
+      "title": "Google API Key",
+      "description": "Your Google Cloud API key with Custom Search JSON API enabled. Get one at console.cloud.google.com/apis/credentials",
       "sensitive": true,
       "required": true
     },
     "google_search_id": {
       "type": "string",
-      "title": "Google Programmable Search Engine ID",
-      "description": "Create a search engine at programmablesearchengine.google.com and copy the Search Engine ID.",
+      "title": "Search Engine ID",
+      "description": "Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com (enable 'Search the entire web')",
       "sensitive": false,
       "required": true
     }
@@ -57,39 +62,40 @@
   "tools": [
     {
       "name": "google_search",
-      "description": "Search the web using Google Custom Search API. Returns URLs with titles and snippets."
+      "description": "Search the web using Google Custom Search API. Returns URLs with titles and snippets. Supports time range, site filtering, and language options."
     },
     {
       "name": "scrape_page",
-      "description": "Extract text content from a URL. Handles web pages, YouTube videos, and documents (PDF, DOCX, PPTX)."
+      "description": "Extract text content from a URL. Handles web pages (static + JavaScript), YouTube videos (transcripts), and documents (PDF, DOCX, PPTX). Supports preview mode and content size limits."
     },
     {
       "name": "search_and_scrape",
-      "description": "Search Google AND retrieve content from top results in one call. Returns combined, deduplicated content."
+      "description": "Search Google AND retrieve content from top results in one call. Returns combined, deduplicated content with source attribution. Most efficient for research tasks."
     },
     {
       "name": "google_image_search",
-      "description": "Search for images using Google Custom Search API. Returns image URLs, thumbnails, and dimensions."
+      "description": "Search for images using Google Custom Search API. Returns image URLs, thumbnails, dimensions. Filter by size, type, color, and format."
     },
     {
       "name": "google_news_search",
-      "description": "Search for recent news articles with freshness filters and date sorting."
+      "description": "Search for recent news articles. Filter by freshness (hour/day/week/month/year), sort by relevance or date, restrict to specific news sources."
     },
     {
       "name": "academic_search",
-      "description": "Search academic papers. Returns papers with citations from arXiv, PubMed, IEEE, Nature, Springer."
+      "description": "Search academic papers with pre-formatted citations. Sources: arXiv, PubMed, IEEE, Nature, Springer. Filter by year range and source."
     },
     {
       "name": "patent_search",
-      "description": "Search patents via Google Patents. Supports prior art search, assignee filtering, and patent office selection."
+      "description": "Search patents via Google Patents. Supports prior art search, assignee/inventor filtering, patent office selection (USPTO, EPO, WIPO, JPO, CNIPA, KIPO)."
     },
     {
       "name": "sequential_search",
-      "description": "Track multi-step research progress across multiple API calls for complex investigations."
+      "description": "Track multi-step research progress across API calls. Supports branching, revision tracking, and session persistence for complex investigations."
     }
   ],
   "tools_generated": false,
   "compatibility": {
+    "claude_desktop": ">=1.0.0",
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
       "node": ">=18.0.0"

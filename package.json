@@ -34,7 +34,6 @@
   ],
   "type": "module",
   "main": "dist/server.js",
-  "module": "./src/smithery.ts",
   "types": "dist/server.d.ts",
   "bin": {
     "google-researcher-mcp": "dist/server.js"

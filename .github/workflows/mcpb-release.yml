@@ -1,0 +1,118 @@
+name: MCPB Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v6.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-mcpb:
+    name: Build MCPB Bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Install MCPB CLI
+        run: npm install -g @anthropic-ai/mcpb
+
+      - name: Validate manifest
+        run: mcpb validate manifest.json
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="v$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
+
+      - name: Update manifest version
+        run: |
+          VERSION_NUMBER="${{ steps.version.outputs.version_number }}"
+          jq --arg v "$VERSION_NUMBER" '.version = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+
+      - name: Build MCPB bundle
+        run: |
+          mcpb pack . google-researcher-mcp.mcpb
+          ls -lh *.mcpb
+
+      - name: Get bundle info
+        run: mcpb info google-researcher-mcp.mcpb
+
+      - name: Upload MCPB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-researcher-mcp-${{ steps.version.outputs.version }}.mcpb
+          path: google-researcher-mcp.mcpb
+          retention-days: 90
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: google-researcher-mcp.mcpb
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-bundle:
+    name: Verify MCPB Bundle
+    needs: build-mcpb
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download MCPB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: google-researcher-mcp-${{ needs.build-mcpb.outputs.version || 'latest' }}.mcpb
+          path: .
+
+      - name: Install MCPB CLI
+        run: npm install -g @anthropic-ai/mcpb
+
+      - name: Verify bundle
+        run: mcpb info google-researcher-mcp.mcpb
+
+      - name: Unpack and validate
+        run: |
+          mcpb unpack google-researcher-mcp.mcpb unpacked
+          ls -la unpacked/
+          cat unpacked/manifest.json | head -20
