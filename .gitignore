@@ -70,3 +70,12 @@ create-prompt-cheat-sheet.js
 *-failure-analysis.md
 *-investigation-*.md
 debug_*.md
+
+# MCPB bundles (generated, distributed via releases)
+*.mcpb
+
+# MCP Registry tokens
+.mcpregistry_*
+
+# Smithery build artifacts
+.smithery/

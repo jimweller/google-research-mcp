@@ -99,6 +99,10 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
+### One-Click Install (MCPB)
+
+Download the latest `.mcpb` bundle from [GitHub Releases](https://github.com/zoharbabin/google-research-mcp/releases) and double-click to install in Claude Desktop. You'll be prompted to enter your Google API credentials.
+
 ### Claude Code
 
 Add to `~/.claude.json`:
