@@ -77,5 +77,6 @@ debug_*.md
 # MCP Registry tokens
 .mcpregistry_*
 
-# Smithery build artifacts
-.smithery/
+# AI assistant configuration (personal settings)
+.claude/
+.ascension/

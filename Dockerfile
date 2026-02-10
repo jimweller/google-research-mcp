@@ -65,7 +65,6 @@ RUN mkdir -p /app/storage && chown -R mcp:mcp /app/storage
 USER mcp
 
 # Expose HTTP transport port (configurable via PORT env var)
-# Smithery uses 8000 by default
 EXPOSE 8000
 
 # Health check for container orchestrators (Docker, Kubernetes).
@@ -73,7 +72,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:${PORT:-8000}/health || exit 1
 
-# For Smithery deployment, run in HTTP mode
+# Default to HTTP mode for containerized deployments
 # For local MCP clients, override with MCP_TEST_MODE=stdio
 ENV PORT=8000
 ENV MCP_TEST_MODE=""

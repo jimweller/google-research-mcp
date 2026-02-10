@@ -17,7 +17,7 @@ PORT=3001 npm start            # Start HTTP server on custom port
 
 ### Testing
 ```bash
-npm test                       # Run all unit/component tests (670+)
+npm test                       # Run all unit/component tests (777)
 npm run test:coverage          # Generate code coverage report
 npm run test:e2e               # Full E2E suite (STDIO + SSE + YouTube)
 npm run test:e2e:stdio         # STDIO transport E2E only

@@ -44,7 +44,7 @@ Dockerfile
 docker-compose*.yml
 .dockerignore
 
-# Smithery config (separate from MCPB)
+# Legacy config files
 smithery.yaml
 
 # Storage and cache (runtime generated)
