@@ -1,14 +1,35 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.zoharbabin/google-researcher",
   "description": "MCP server providing Google Search, web scraping, and multi-source research tools for AI assistants",
-  "version": "6.0.0",
-  "repository": "https://github.com/zoharbabin/google-research-mcp",
+  "version": "1.2.1",
+  "repository": {
+    "url": "https://github.com/zoharbabin/google-research-mcp",
+    "source": "github"
+  },
   "packages": [
     {
-      "registry_type": "npm",
+      "registryType": "npm",
       "identifier": "google-researcher-mcp",
-      "version": "6.0.0"
+      "version": "1.2.1",
+      "runtimeHint": "node",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "GOOGLE_CUSTOM_SEARCH_API_KEY",
+          "description": "Google Custom Search API key",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "GOOGLE_CUSTOM_SEARCH_ID",
+          "description": "Google Programmable Search Engine ID",
+          "isRequired": true,
+          "isSecret": false
+        }
+      ]
     }
   ]
 }
