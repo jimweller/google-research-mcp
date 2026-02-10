@@ -2571,9 +2571,15 @@ app.get("/mcp/oauth-token-info",
  * Shutdown handler for graceful cache persistence
  *
  * Ensures cache data is written to disk when the server is terminated
- * with SIGINT (Ctrl+C). This prevents data loss during shutdown.
+ * with SIGINT (Ctrl+C) or SIGTERM. This prevents data loss during shutdown.
  */
+let isShuttingDown = false;
 async function gracefulShutdown(signal: string) {
+    if (isShuttingDown) {
+        logger.debug(`Shutdown already in progress, ignoring ${signal}`);
+        return;
+    }
+    isShuttingDown = true;
     logger.info(`Received ${signal}. Closing transports and persisting data before exit...`);
     try {
         if (stdioTransportInstance && typeof stdioTransportInstance.close === 'function') {
