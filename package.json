@@ -1,5 +1,6 @@
 {
   "name": "google-researcher-mcp",
+  "mcpName": "io.github.zoharbabin/google-researcher",
   "version": "6.0.0",
   "description": "An MCP server providing Google Search, web scraping, and multi-source research tools for AI assistants.",
   "author": {
@@ -18,12 +19,18 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "ai",
-    "agent",
-    "research",
+    "claude",
+    "anthropic",
+    "ai-tools",
     "google-search",
-    "scraping",
-    "llm"
+    "web-scraping",
+    "research",
+    "academic-search",
+    "patent-search",
+    "youtube-transcripts",
+    "pdf-extraction",
+    "llm-tools",
+    "ai-assistant"
   ],
   "type": "module",
   "main": "dist/server.js",

@@ -116,6 +116,27 @@ import {
   type SizeMetadata,
 } from "./shared/contentSizeOptimization.js";
 
+// ── Smithery MCP Marketplace Configuration ─────────────────────────────
+
+/**
+ * Configuration schema for Smithery MCP Marketplace
+ * Defines the environment variables needed to run this server
+ */
+export const configSchema = {
+  type: "object",
+  properties: {
+    GOOGLE_CUSTOM_SEARCH_API_KEY: {
+      type: "string",
+      description: "Google Custom Search API key from console.cloud.google.com"
+    },
+    GOOGLE_CUSTOM_SEARCH_ID: {
+      type: "string",
+      description: "Google Programmable Search Engine ID from programmablesearchengine.google.com"
+    }
+  },
+  required: ["GOOGLE_CUSTOM_SEARCH_API_KEY", "GOOGLE_CUSTOM_SEARCH_ID"]
+} as const;
+
 // ── Server Configuration Constants ─────────────────────────────
 
 /** Timeout for Google Search API calls */
