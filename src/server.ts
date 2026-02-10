@@ -1277,21 +1277,57 @@ function configureToolsAndResources(
                 const errorMsg = `Search failed: ${sanitizeErrorMessage(error instanceof Error ? error.message : String(error))}`;
                 errors.push(errorMsg);
                 logger.warn(errorMsg, { traceId });
+                const errorText = `Search failed for "${trimmedQuery}". Error: ${errorMsg}`;
+                const errorStructuredContent: SearchAndScrapeOutput = {
+                    query: trimmedQuery,
+                    sources: [],
+                    combinedContent: errorText,
+                    summary: {
+                        urlsSearched: 0,
+                        urlsScraped: 0,
+                        processingTimeMs: Date.now() - startTime,
+                    },
+                    sizeMetadata: {
+                        contentLength: errorText.length,
+                        estimatedTokens: estimateTokens(errorText),
+                        truncated: false,
+                        sizeCategory: 'small',
+                    },
+                };
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Search failed for "${trimmedQuery}". Error: ${errorMsg}`
-                    }]
+                        text: errorText
+                    }],
+                    structuredContent: errorStructuredContent,
                 };
             }
 
             const urls = searchResults.map((c) => c.text);
             if (urls.length === 0) {
+                const noUrlsText = `No URLs found for query "${trimmedQuery}".`;
+                const noUrlsStructuredContent: SearchAndScrapeOutput = {
+                    query: trimmedQuery,
+                    sources: [],
+                    combinedContent: noUrlsText,
+                    summary: {
+                        urlsSearched: 0,
+                        urlsScraped: 0,
+                        processingTimeMs: Date.now() - startTime,
+                    },
+                    sizeMetadata: {
+                        contentLength: noUrlsText.length,
+                        estimatedTokens: estimateTokens(noUrlsText),
+                        truncated: false,
+                        sizeCategory: 'small',
+                    },
+                };
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `No URLs found for query "${trimmedQuery}".`
-                    }]
+                        text: noUrlsText
+                    }],
+                    structuredContent: noUrlsStructuredContent,
                 };
             }
 
@@ -1420,11 +1456,29 @@ function configureToolsAndResources(
 
             if (successfulScrapes.length === 0) {
                 const errorSummary = errors.length > 0 ? `\n\nErrors encountered:\n${errors.join('\n')}` : '';
+                const noScrapeText = `No content could be scraped from the ${urls.length} URLs found for "${trimmedQuery}".${errorSummary}`;
+                const noScrapeStructuredContent: SearchAndScrapeOutput = {
+                    query: trimmedQuery,
+                    sources: allSources, // Include failed sources for debugging
+                    combinedContent: noScrapeText,
+                    summary: {
+                        urlsSearched: urls.length,
+                        urlsScraped: 0,
+                        processingTimeMs: Date.now() - startTime,
+                    },
+                    sizeMetadata: {
+                        contentLength: noScrapeText.length,
+                        estimatedTokens: estimateTokens(noScrapeText),
+                        truncated: false,
+                        sizeCategory: 'small',
+                    },
+                };
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `No content could be scraped from the ${urls.length} URLs found for "${trimmedQuery}".${errorSummary}`
-                    }]
+                        text: noScrapeText
+                    }],
+                    structuredContent: noScrapeStructuredContent,
                 };
             }
 
