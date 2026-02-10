@@ -137,6 +137,32 @@ export const configSchema = {
   required: ["GOOGLE_CUSTOM_SEARCH_API_KEY", "GOOGLE_CUSTOM_SEARCH_ID"]
 } as const;
 
+/**
+ * Creates a sandbox server instance for Smithery capability scanning.
+ * This allows Smithery to discover tools/resources without real credentials.
+ * @returns McpServer instance configured with all tools and resources
+ */
+export function createSandboxServer(): McpServer {
+  // Set mock environment variables for scanning (won't make real API calls)
+  if (!process.env.GOOGLE_CUSTOM_SEARCH_API_KEY) {
+    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY = 'sandbox-test-key';
+  }
+  if (!process.env.GOOGLE_CUSTOM_SEARCH_ID) {
+    process.env.GOOGLE_CUSTOM_SEARCH_ID = 'sandbox-test-id';
+  }
+
+  const server = new McpServer({
+    name: "google-researcher-mcp-sandbox",
+    version: PKG_VERSION,
+  });
+
+  // Configure tools and resources (defined later in the file)
+  // This uses a forward reference that works because the function is called at runtime
+  configureToolsAndResources(server);
+
+  return server;
+}
+
 // ── Server Configuration Constants ─────────────────────────────
 
 /** Timeout for Google Search API calls */
