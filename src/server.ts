@@ -68,6 +68,8 @@ import {
   annotateError,
 } from "./shared/contentAnnotations.js";
 import { registerResources, trackSearch, type RecentSearch } from "./resources/index.js";
+import { MetricsCollector } from "./shared/metricsCollector.js";
+import { formatPrometheusMetrics } from "./shared/prometheusFormatter.js";
 import { registerPrompts } from "./prompts/index.js";
 import {
   type GoogleSearchResponse,
@@ -254,6 +256,7 @@ const DEFAULT_CRAWLEE_STORAGE_PATH = path.resolve(PROJECT_ROOT, 'storage', 'craw
 let globalCacheInstance: PersistentCache;
 let eventStoreInstance: PersistentEventStore;
 let transcriptExtractorInstance: RobustYouTubeTranscriptExtractor;
+let globalMetricsCollector: MetricsCollector;
 let stdioServerInstance: McpServer | undefined;
 let stdioTransportInstance: StdioServerTransport | undefined;
 let httpTransportInstance: StreamableHTTPServerTransport | undefined;
@@ -334,10 +337,13 @@ async function initializeGlobalInstances(
   // Initialize robust YouTube transcript extractor
   transcriptExtractorInstance = new RobustYouTubeTranscriptExtractor();
 
+  // Initialize metrics collector for per-tool execution metrics
+  globalMetricsCollector = new MetricsCollector();
+
   // Load data eagerly
   await globalCacheInstance.loadFromDisk(); // Cache needs explicit load
   // Event store loads eagerly via constructor option, no explicit call needed here
-  logger.info('Global Cache, Event Store, and YouTube Transcript Extractor initialized.');
+  logger.info('Global Cache, Event Store, YouTube Transcript Extractor, and Metrics Collector initialized.');
 }
 
 // --- Tool/Resource Configuration (Moved to Top Level) ---
@@ -2107,7 +2113,7 @@ function configureToolsAndResources(
     registerResources(server, globalCacheInstance, eventStoreInstance, {
         version: PKG_VERSION,
         startTime: new Date(),
-    });
+    }, globalMetricsCollector);
 
     // Register prompts for research workflows
     registerPrompts(server);
@@ -2404,6 +2410,34 @@ app.get("/mcp/event-store-stats", async (_req: Request, res: Response) => {
             error: "Failed to get event store stats",
             message: (error as Error).message
         });
+    }
+});
+
+/**
+ * Prometheus metrics endpoint
+ *
+ * Exports tool execution metrics in Prometheus exposition format.
+ * Includes:
+ * - Server uptime
+ * - Per-tool call counts, success/failure rates
+ * - Latency percentiles (p50, p95, p99)
+ * - Cache hit/miss rates
+ */
+app.get("/mcp/metrics/prometheus", (_req: Request, res: Response) => {
+    try {
+        if (!globalMetricsCollector) {
+            res.status(503).send('# Metrics collector not initialized\n');
+            return;
+        }
+        const metrics = globalMetricsCollector.getMetrics();
+        if (!metrics || typeof metrics !== 'object' || !('tools' in metrics)) {
+            res.status(500).send('# Invalid metrics format\n');
+            return;
+        }
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send(formatPrometheusMetrics(metrics));
+    } catch (error) {
+        res.status(500).send(`# Error generating metrics: ${(error as Error).message}\n`);
     }
 });
 

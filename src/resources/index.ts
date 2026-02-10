@@ -9,13 +9,16 @@
  * - config://server - Server configuration (non-sensitive)
  * - stats://cache - Cache statistics
  * - stats://events - Event store statistics
+ * - stats://tools - All tool metrics (ServerMetrics)
+ * - stats://tools/{name} - Single tool metrics (ToolMetrics)
  * - search://results/{query} - Cached results for a specific query (template)
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { PersistentCache } from '../cache/index.js';
 import type { PersistentEventStore } from '../shared/persistentEventStore.js';
+import type { MetricsCollector } from '../shared/metricsCollector.js';
 import { getCurrentSessionForResource } from '../tools/sequentialSearch.js';
 import { getResourceContent, listCachedResources, getResourceCacheStats } from '../shared/resourceLinks.js';
 
@@ -89,12 +92,14 @@ export function clearRecentSearches(): void {
  * @param cache - The persistent cache instance
  * @param eventStore - The event store instance (optional)
  * @param config - Server configuration
+ * @param metricsCollector - The metrics collector instance (optional)
  */
 export function registerResources(
   server: McpServer,
   cache: PersistentCache,
   eventStore: PersistentEventStore | null,
-  config: ServerConfig
+  config: ServerConfig,
+  metricsCollector?: MetricsCollector
 ): void {
   // ── search://recent ──────────────────────────────────────────────────────
   server.resource(
@@ -237,6 +242,95 @@ export function registerResources(
               text: JSON.stringify(
                 {
                   ...stats,
+                  generatedAt: new Date().toISOString(),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    );
+  }
+
+  // ── stats://tools ───────────────────────────────────────────────────────────
+  if (metricsCollector) {
+    server.resource(
+      'tool-stats',
+      'stats://tools',
+      {
+        description: 'Per-tool execution metrics including call counts, success rates, and latency',
+        mimeType: 'application/json',
+      },
+      async (uri) => {
+        const metrics = metricsCollector.getMetrics();
+
+        return {
+          contents: [
+            {
+              uri: uri.toString(),
+              mimeType: 'application/json',
+              text: JSON.stringify(
+                {
+                  ...metrics,
+                  generatedAt: new Date().toISOString(),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    );
+
+    // ── stats://tools/{name} (template) ─────────────────────────────────────────
+    const toolStatsTemplate = new ResourceTemplate('stats://tools/{name}', {
+      list: undefined, // No listing support - use stats://tools for full list
+    });
+
+    server.resource(
+      'tool-stats-by-name',
+      toolStatsTemplate,
+      {
+        description: 'Metrics for a specific tool by name',
+        mimeType: 'application/json',
+      },
+      async (uri, params) => {
+        const toolName = params.name as string;
+        const metrics = metricsCollector.getMetrics(toolName);
+
+        if (!metrics) {
+          return {
+            contents: [
+              {
+                uri: uri.toString(),
+                mimeType: 'application/json',
+                text: JSON.stringify(
+                  {
+                    error: 'Tool not found',
+                    tool: toolName,
+                    message: `No metrics available for tool '${toolName}'`,
+                    generatedAt: new Date().toISOString(),
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        return {
+          contents: [
+            {
+              uri: uri.toString(),
+              mimeType: 'application/json',
+              text: JSON.stringify(
+                {
+                  tool: toolName,
+                  ...metrics,
                   generatedAt: new Date().toISOString(),
                 },
                 null,

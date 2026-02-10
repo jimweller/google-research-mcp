@@ -361,7 +361,7 @@ Searches Google Patents for prior art, freedom to operate (FTO) analysis, and pa
 | Feature | Description |
 |---------|-------------|
 | **Tools** | 8 tools: `search_and_scrape`, `google_search`, `google_image_search`, `google_news_search`, `scrape_page`, `sequential_search`, `academic_search`, `patent_search` |
-| **Resources** | Expose server state (recent searches, cache stats, config) |
+| **Resources** | Expose server state: `stats://tools` (per-tool metrics), `stats://cache`, `search://recent`, `config://server` |
 | **Prompts** | Pre-built templates: `comprehensive-research`, `fact-check`, `summarize-url`, `news-briefing` |
 | **Annotations** | Content tagged with audience, priority, and timestamps |
 
