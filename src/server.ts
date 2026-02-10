@@ -2164,11 +2164,7 @@ export async function createAppAndHttpTransport(
   validateEnvironmentOrExit();
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(s => s.length > 0)
-  : [];
-
-if (ALLOWED_ORIGINS.length === 0) {
-  logger.warn('ALLOWED_ORIGINS not configured - CORS will reject cross-origin requests. Set ALLOWED_ORIGINS env var for production use.');
-}
+  : ["*"]; // Default to allow all - MCP clients are typically not browsers
 
   // Create the Express app instance here
   const app = express();
