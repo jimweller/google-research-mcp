@@ -1,0 +1,14 @@
+# Smithery MCP Marketplace Configuration
+# https://smithery.ai
+
+runtime: "typescript"
+entrypoint: "dist/server.js"
+
+# Environment variables required for operation
+env:
+  - name: GOOGLE_CUSTOM_SEARCH_API_KEY
+    description: "Google Custom Search API key from console.cloud.google.com"
+    required: true
+  - name: GOOGLE_CUSTOM_SEARCH_ID
+    description: "Google Programmable Search Engine ID from programmablesearchengine.google.com"
+    required: true

@@ -1,11 +1,54 @@
 # Google Researcher MCP Server
 
-[![CI/CD](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/google-researcher-mcp.svg)](https://www.npmjs.com/package/google-researcher-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/google-researcher-mcp.svg)](https://www.npmjs.com/package/google-researcher-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
+[![Tests](https://github.com/zoharbabin/google-research-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/zoharbabin/google-research-mcp/actions)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 
-> **An MCP server that gives AI assistants real-time web research capabilities.**
+> Professional research tools for AI assistants - Google Search, web scraping, academic papers, patents, and more
+
+## Features
+
+| Tool | Description |
+|------|-------------|
+| `google_search` | Web search with site, date, and language filters |
+| `google_news_search` | News search with freshness controls |
+| `google_image_search` | Image search with type, size, color filters |
+| `scrape_page` | Extract content from web pages, PDFs, DOCX |
+| `search_and_scrape` | Combined search + content extraction |
+| `academic_search` | Papers from arXiv, PubMed, IEEE, Springer |
+| `patent_search` | Patent search with assignee/inventor filters |
+| YouTube | Automatic transcript extraction |
+| `sequential_search` | Multi-step research tracking |
+
+## Use Cases
+
+- **Research Assistants**: Enable Claude to search the web and synthesize information
+- **Content Creation**: Gather sources, citations, and supporting evidence
+- **Academic Research**: Find papers, extract citations, track research progress
+- **Competitive Intelligence**: Patent searches, company research, market analysis
+- **News Monitoring**: Track breaking news, industry updates, specific sources
+- **Technical Documentation**: Extract content from docs, tutorials, and references
+
+## Comparison with Alternatives
+
+| Feature | Google Researcher | Basic Web Search | Manual Research |
+|---------|------------------|------------------|-----------------|
+| Web Search | Yes | Yes | No |
+| News Search | Yes | No | No |
+| Image Search | Yes | No | No |
+| Academic Papers | Yes | No | Yes |
+| Patent Search | Yes | No | Yes |
+| YouTube Transcripts | Yes | No | No |
+| PDF Extraction | Yes | No | No |
+| Citation Generation | Yes | No | Yes |
+| Response Caching | Yes (30min) | No | N/A |
+| Rate Limiting | Yes | No | N/A |
+
+---
 
 This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables AI assistants like Claude, GPT, and other LLMs to:
 
@@ -18,11 +61,10 @@ Built for production use with caching, quality scoring, and enterprise security.
 
 ## Quick Start
 
-### Zero-Install (npx)
+### Claude Desktop (macOS)
 
-The fastest way to start — no cloning required. Add this to your MCP client config:
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-**Claude Code** (`~/.claude/claude_desktop_config.json`), **Cline**, or **Roo Code** (MCP settings):
 ```json
 {
   "mcpServers": {
@@ -30,15 +72,57 @@ The fastest way to start — no cloning required. Add this to your MCP client co
       "command": "npx",
       "args": ["-y", "google-researcher-mcp"],
       "env": {
-        "GOOGLE_CUSTOM_SEARCH_API_KEY": "your-key",
-        "GOOGLE_CUSTOM_SEARCH_ID": "your-cx"
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "YOUR_API_KEY_HERE",
+        "GOOGLE_CUSTOM_SEARCH_ID": "YOUR_SEARCH_ID_HERE"
       }
     }
   }
 }
 ```
 
-Replace `your-key` and `your-cx` with your [Google Custom Search API Key](https://developers.google.com/custom-search/v1/introduction) and [Search Engine ID](https://programmablesearchengine.google.com/).
+### Claude Desktop (Windows)
+
+Add to `%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "npx",
+      "args": ["-y", "google-researcher-mcp"],
+      "env": {
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "YOUR_API_KEY_HERE",
+        "GOOGLE_CUSTOM_SEARCH_ID": "YOUR_SEARCH_ID_HERE"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+Add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "google-researcher": {
+      "command": "npx",
+      "args": ["-y", "google-researcher-mcp"],
+      "env": {
+        "GOOGLE_CUSTOM_SEARCH_API_KEY": "YOUR_API_KEY_HERE",
+        "GOOGLE_CUSTOM_SEARCH_ID": "YOUR_SEARCH_ID_HERE"
+      }
+    }
+  }
+}
+```
+
+### Cline / Roo Code
+
+Use the same JSON configuration above in your MCP settings.
+
+**Need API keys?** See the [API Setup Guide](docs/API_SETUP.md) for step-by-step instructions to get your Google API credentials.
 
 ### Local Development
 
