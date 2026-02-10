@@ -163,6 +163,24 @@ export function createSandboxServer(): McpServer {
   return server;
 }
 
+/**
+ * Creates a server instance for Smithery deployment.
+ * This is called by the Smithery entry point (smithery.ts) after
+ * environment variables have been set from user config.
+ * @returns The low-level Server object that Smithery expects
+ */
+export function createSmitheryServer() {
+  const server = new McpServer({
+    name: "google-researcher-mcp",
+    version: PKG_VERSION,
+  });
+
+  configureToolsAndResources(server);
+
+  // Smithery expects the low-level Server object, not McpServer
+  return server.server;
+}
+
 // ── Server Configuration Constants ─────────────────────────────
 
 /** Timeout for Google Search API calls */

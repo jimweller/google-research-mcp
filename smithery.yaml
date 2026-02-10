@@ -1,13 +1,9 @@
 # Smithery MCP Marketplace Configuration
 # https://smithery.ai
-# Using container runtime to support crawlee/playwright dependencies
+# Local (stdio) distribution - runs on user's machine
 
-runtime: "container"
-build:
-  dockerfile: "Dockerfile"
-  dockerBuildPath: "."
 startCommand:
-  type: "http"
+  type: "stdio"
   configSchema:
     type: object
     properties:
