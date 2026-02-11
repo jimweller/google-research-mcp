@@ -17,7 +17,7 @@ PORT=3001 npm start            # Start HTTP server on custom port
 
 ### Testing
 ```bash
-npm test                       # Run all unit/component tests (777)
+npm test                       # Run all unit/component tests (840+)
 npm run test:coverage          # Generate code coverage report
 npm run test:e2e               # Full E2E suite (STDIO + SSE + YouTube)
 npm run test:e2e:stdio         # STDIO transport E2E only
@@ -73,6 +73,17 @@ src/
 - `academic_search` - Academic paper search
 - `patent_search` - Patent search
 - `sequential_search` - Multi-step research tracking
+
+## MCP Resources (stats://*)
+- `stats://tools` - Per-tool execution metrics (calls, latency, cache hits)
+- `stats://tools/{name}` - Single tool metrics
+- `stats://cache` - Cache performance metrics
+- `stats://events` - Event store statistics
+
+## Monitoring Endpoints (HTTP mode)
+- `GET /mcp/metrics/prometheus` - Prometheus format metrics
+- `GET /mcp/cache-stats` - Cache statistics JSON
+- `GET /mcp/event-store-stats` - Event store statistics JSON
 
 ## Key Files
 - `package.json` - Dependencies and scripts
