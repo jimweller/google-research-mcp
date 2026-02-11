@@ -34,8 +34,9 @@ The Google Researcher MCP Server is a backend service that implements the [Model
 -   **`patent_search`**: Searches Google Patents for prior art, FTO analysis, and patent landscaping. Supports filtering by patent office, assignee, inventor, and CPC code.
 
 The server also exposes:
--   **MCP Resources**: Server state (recent searches, cache stats, configuration) via the Resources protocol.
+-   **MCP Resources**: Server state (recent searches, cache stats, tool metrics, configuration) via the Resources protocol.
 -   **MCP Prompts**: Pre-built research workflow templates (comprehensive research, fact-check, summarize, news briefing).
+-   **Metrics**: Per-tool execution metrics with latency percentiles, cache hit rates, and Prometheus export. See [metrics-design.md](./metrics-design.md).
 
 To deliver these capabilities reliably and efficiently, the server is built with production-grade features, including quality scoring, content deduplication, a two-layer persistent cache, robust timeout and error handling, and enterprise-grade security for its web-facing endpoints.
 
@@ -62,6 +63,9 @@ google-researcher-mcp/
 │   ├── resources/                # MCP Resources (server state)
 │   ├── schemas/                  # Zod schemas for tool outputs
 │   ├── shared/                   # Shared utilities
+│   │   ├── metricsCollector.ts   # Per-tool execution metrics
+│   │   ├── instrumentTool.ts     # Tool wrapper for auto metrics
+│   │   ├── prometheusFormatter.ts # Prometheus export format
 │   │   ├── circuitBreaker.ts     # Resilience for external APIs
 │   │   ├── contentAnnotations.ts # MCP content annotations
 │   │   ├── contentDeduplication.ts
